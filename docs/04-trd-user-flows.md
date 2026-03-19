@@ -10,7 +10,7 @@
 
 ## 1. System Architecture
 
-CareMap is structured as a monorepo with two workspaces: `apps/web` (Vite + React SPA frontend) and `apps/api` (future Fastify backend). The frontend currently runs entirely on mock data. The backend will communicate with Supabase (Postgres) for data storage and an LLM provider for AI capabilities.
+CareMap is structured as a monorepo with two workspaces: `apps/web` (Vite + React SPA frontend) and `apps/api` (Fastify backend). The backend follows a **native-first execution model** — all data operations run as native TypeScript or Supabase SQL before considering external sandboxes. Full architectural details are in `docs/06-backend-architecture.md`.
 
 ### Architecture Diagram
 
@@ -25,8 +25,8 @@ User (Browser)
 │  ├── Flow Canvas (ReactFlow 12)                       │
 │  ├── Agent Panel (Zeit AI-style conversation UI)      │
 │  │   └── CareMap AI (single contextual agent)         │
-│  ├── Dashboard (Recharts + built-in widgets)          │
-│  └── Settings (model configuration)                   │
+│  ├── Dashboard (composed from pinned chat artifacts)  │
+│  └── Settings (model config, project prefs)           │
 │                                                        │
 │  STATE MANAGEMENT (Zustand, project-scoped)           │
 │  ├── pipeline-store  → nodes, edges, selection        │
@@ -40,50 +40,79 @@ User (Browser)
 │  ├── /projects/:id/dashboard → Analytics dashboard    │
 │  └── /settings               → Configuration         │
 └────────────┬──────────────────────────────────────────┘
-             │ (future: REST / streaming APIs)
+             │  REST + SSE (Vercel AI SDK data stream)
              ▼
 ┌───────────────────────────────────────────────────────┐
-│            apps/api — Fastify (to be built)            │
+│            apps/api — Fastify 5 + TypeScript           │
+│                                                        │
+│  AGENT LAYER (Vercel AI SDK 6)                         │
+│  ├── ToolLoopAgent (single contextual agent)           │
+│  │   ├── Pipeline tools (parse, profile, clean, map)   │
+│  │   ├── Analyst tools (query, artifact, lineage)      │
+│  │   └── Shared tools (quality, semantic layer)        │
+│  ├── Streaming: createUIMessageStream                  │
+│  └── Approval gates: needsApproval per tool            │
+│                                                        │
+│  NATIVE PROCESSING LAYER                               │
+│  ├── PapaParse / xlsx → file parsing                   │
+│  ├── TypeScript fns   → stats, cleaning, transforms    │
+│  └── Zod              → schema validation              │
 │                                                        │
 │  API ROUTES                                            │
-│  ├── POST /api/ingest      → File parse + AI profiling│
-│  ├── POST /api/map         → Mapping suggestions      │
-│  ├── POST /api/harmonize   → Data transformation      │
-│  ├── POST /api/chat        → Streaming AI responses   │
-│  └── GET  /api/dashboard   → Widgets + alerts         │
+│  ├── POST /api/ingest       → File parse + profiling   │
+│  ├── POST /api/chat         → Agent streaming (tools)  │
+│  ├── POST /api/pipeline/run → Node-triggered agent     │
+│  ├── GET  /api/mappings     → Mapping CRUD             │
+│  ├── POST /api/harmonize    → Write to canonical store │
+│  ├── GET  /api/dashboard    → Pinned artifacts + alerts│
+│  └── CRUD /api/projects     → Project management       │
 └────────────┬──────────────────────────────────────────┘
              │
-     ┌───────┴────────┐
-     ▼                ▼
-┌──────────┐   ┌─────────────────┐
-│ Supabase │   │  LLM Provider    │
-│ (Postgres│   │                  │
-│  + Real- │   │  Cloud: GPT-4.1/ │
-│  time)   │   │  Claude Sonnet   │
-│          │   │  Custom: Ollama  │
-└──────────┘   └─────────────────┘
+     ┌───────┼────────┐
+     ▼       ▼        ▼
+┌─────────┐ ┌──────┐ ┌───────────────┐
+│Supabase │ │ LLM  │ │ E2B Sandbox   │
+│(Postgres│ │      │ │ (escape hatch │
+│+Storage │ │GPT/  │ │  for complex  │
+│+Realtime│ │Claude│ │  analytics)   │
+│)        │ │/Local│ │               │
+└─────────┘ └──────┘ └───────────────┘
 ```
+
+### Key Architectural Decision: Native-First Execution
+
+Data operations follow a priority chain:
+
+1. **Native TypeScript** — file parsing, statistical profiling (null rates, distributions, type detection), cleaning (date parsing, null handling, dedup), row transformation. No LLM, no sandbox.
+2. **Supabase SQL** — querying the harmonized store, aggregations, quality checks, joins, referential integrity. Uses `execute_readonly_sql` RPC for safe read-only queries.
+3. **LLM Inference** — semantic interpretation (clinical labels, domain mapping), mapping proposals with reasoning, cleaning plan suggestions, chat responses. The LLM reasons about data; it does not process it directly.
+4. **E2B Sandbox** — activated only when the user requests complex statistical analysis (correlations, regressions, time series) or custom scripts that exceed native TS + SQL capabilities. Always requires user approval.
 
 ### Key Architectural Decision: Single Contextual AI Agent
 
-CareMap uses a **single unified AI agent** ("CareMap AI") rather than multiple named agents. The agent adapts its behaviour based on user context: on the canvas it helps profile sources and map fields, on the dashboard it helps analyze and explore data. There is no agent selector or multi-step workflow stepper in the UI.
+CareMap uses a **single unified AI agent** ("CareMap AI") powered by Vercel AI SDK 6's `ToolLoopAgent`. The agent adapts its behavior based on trigger context:
+
+- **Pipeline mode** (triggered by node actions): acts as a data engineer — profiles, cleans, maps, transforms
+- **Conversation mode** (triggered by chat input): acts as a data analyst — queries the harmonized store, generates artifacts, explains lineage
+
+Same agent, same tools, same semantic context. The system prompt adapts a preamble based on the trigger type.
 
 The conversation UI follows a **document-stream pattern** inspired by Zeit AI:
 - User messages with inline entity references (data assets as interactive pills)
 - Agent responses with transparent tool execution steps, rich content, tabbed artifacts (tables, charts), and approval gates
 - Full provenance and reasoning for every AI action
 
-Agent tools (to be wired to the backend): `profileSource`, `proposeMappings`, `runQualityCheck`, `executeSQL`, `generateChart`, `explainLineage`. All tools share a common semantic layer stored in Supabase.
+Agent tools: `parse_file`, `profile_columns`, `suggest_cleaning`, `execute_cleaning`, `propose_mappings`, `confirm_mappings`, `run_harmonization`, `run_query`, `generate_artifact`, `explain_lineage`, `run_quality_check`, `update_semantic_layer`, `run_analysis_script`. All tools share a semantic layer stored in Supabase.
 
-### Key Architectural Decision: Dynamic Semantic Layer with Sandbox Hydration
+### Key Architectural Decision: Dynamic Semantic Layer
 
-The semantic layer is not a static set of YAML files. It is generated dynamically from user uploads and confirmed mappings.
+The semantic layer is generated dynamically from user uploads and confirmed mappings. It is stored in Supabase (`semantic_entities`, `semantic_fields`, `semantic_joins`) and assembled into the agent's system prompt before every invocation.
 
-**Write path (Builder Agent):** User uploads a file → Builder Agent profiles it → profile metadata is written to Supabase (`source_profiles`, `semantic_entities`, `semantic_fields`, `semantic_joins` tables) → user corrects via UI → corrections update the same Supabase rows → when mappings are confirmed and data harmonized, the semantic model is updated.
+**Write path:** Source upload → native profiling → LLM interpretation → profiles saved to `source_profiles` → user confirms mappings → data harmonized to canonical tables → `update_semantic_layer` tool writes entities, fields, joins to Supabase.
 
-**Read path (Analyst Agent):** User asks a question in chat → API route spins up a Vercel Sandbox → queries Supabase for the current semantic layer metadata → serializes it into YAML entity files in the sandbox filesystem → agent explores the YAML with `cat`, `grep`, `ls` commands → builds SQL from what it discovers → executes SQL against Supabase canonical tables → streams the result back.
+**Read path:** User asks a question in chat → backend assembles semantic context from Supabase → agent receives it as part of system prompt → agent writes SQL using entity/field names → executes via `run_query` → streams results + optional chart artifact.
 
-This pattern keeps Supabase as the single source of truth (the frontend reads and writes it normally), while giving the agent the file-based exploration pattern proven by the Vercel OSS Data Analyst reference architecture. The sandbox is ephemeral — each conversation gets a fresh workspace with the latest semantic layer.
+No sandbox is needed for the read path. The semantic layer is injected directly into the agent's context window.
 
 ---
 
@@ -102,12 +131,15 @@ This pattern keeps Supabase as the single source of truth (the frontend reads an
 | Components | shadcn/ui (@base-ui/react) | — | Headless component primitives (uses `render` prop, NOT `asChild`) |
 | Icons | Lucide React | — | Consistent icon system |
 | Fonts | Inter + Geist Mono | — | Body and monospace typography |
-| Backend (future) | Fastify | — | REST API server (apps/api workspace) |
-| Database | Supabase (Postgres) | — | Canonical store, metadata, pipeline state |
-| File parsing | Papa Parse | 5.x | CSV parsing |
-| File parsing | SheetJS | — | Excel parsing |
-| File parsing | pdf-parse | — | PDF text extraction |
-| Deployment | Vercel | — | Frontend hosting (connected to GitHub repo) |
+| Backend | Fastify | 5.x | REST API server (apps/api workspace) |
+| AI Agent | Vercel AI SDK | 6.x | ToolLoopAgent, tool approval, streaming |
+| Database | Supabase (Postgres + Storage) | — | Canonical store, metadata, pipeline state, file storage |
+| File Parsing | PapaParse | 5.x | CSV parsing (native TS) |
+| File Parsing | xlsx / exceljs | — | Excel parsing (native TS) |
+| Validation | Zod | 3.x | Request/schema validation |
+| Sandbox | E2B Code Interpreter | — | Python sandbox for complex analytics (escape hatch) |
+| Frontend Hosting | Vercel | — | Connected to GitHub repo |
+| Backend Hosting | Railway / Vercel | — | Fastify API deployment |
 
 ---
 
@@ -302,76 +334,76 @@ quality_alerts
 
 ## 4. API Contracts
 
+Full route details in `docs/06-backend-architecture.md` §12. Summary below.
+
 ### POST /api/ingest
 
-Triggered when a file is uploaded to a source node. Parses the file and runs AI profiling.
+Triggered when a file is uploaded to a source node. Runs the agent in pipeline mode: parse → profile → suggest cleaning → (approval) → clean.
 
 ```
 Request:
   Content-Type: multipart/form-data
-  Fields: nodeId (string), file (File)
+  Query: projectId, nodeId
+  Fields: file (File)
 
 Response:
-  Content-Type: text/event-stream (AI SDK data stream)
-  Stream contents:
-    - { type: "parse_complete", rowCount: 247, columns: ["col1", "col2", ...] }
-    - { type: "profile_column", name: "Sturzrisiko_Skala", inferredType: "number",
-        semanticLabel: "Fall Risk Score", domain: "care_assessments",
-        confidence: 0.92, sampleValues: [0,1,2,3,4], qualityFlags: [] }
-    - ... (one per column, streamed)
-    - { type: "profile_complete", overallQuality: "good", suggestedLabel: "Care Assessments" }
-```
-
-### POST /api/map
-
-Triggered when source nodes are connected to a mapping node. Generates mapping suggestions.
-
-```
-Request:
-  { nodeId: string, sourceNodeIds: string[] }
-
-Response:
-  Content-Type: text/event-stream
-  Stream contents:
-    - { type: "mapping", sourceColumn: "Sturzrisiko_Skala",
-        targetTable: "care_assessments", targetColumn: "score",
-        meta: { assessment_type: "fall_risk" },
-        confidence: 0.92, reasoning: "Column name = fall risk scale, values 0-4" }
-    - ... (one per source column)
-    - { type: "semantic_model_update", entities: [...], joins: [...] }
-```
-
-### POST /api/harmonize
-
-Triggered when user confirms mappings and clicks "Harmonize".
-
-```
-Request:
-  { nodeId: string, mappings: FieldMapping[], sourceFileId: string }
-
-Response:
-  { recordsWritten: 247, errors: [], qualityAlerts: [...] }
+  Content-Type: text/event-stream (Vercel AI SDK data stream)
+  Stream contents (via createUIMessageStream):
+    - text-delta: agent narration ("Parsing 50,234 rows...")
+    - tool-call: parse_file → tool-result: { columns, rowCount }
+    - tool-call: profile_columns → tool-result: per-column stats + semantic labels
+    - tool-call: suggest_cleaning → tool-result: cleaning plan artifact
+    - tool-call: execute_cleaning (needsApproval) → pauses for user
+    - On approval: tool-result: cleaned stats, before/after samples
 ```
 
 ### POST /api/chat
 
-Conversational queries via the analyst agent.
+Conversational queries via the agent in conversation mode.
 
 ```
 Request:
-  { messages: Message[] }  // Vercel AI SDK message format
+  { messages: Message[], projectId: string }
 
 Response:
-  Content-Type: text/event-stream (AI SDK data stream)
+  Content-Type: text/event-stream (Vercel AI SDK data stream)
   Stream contents:
-    - text deltas (narrative explanation)
-    - tool call results (SQL execution, chart specs, lineage)
-    - chart specifications (rendered on client by Recharts)
+    - text-delta: narrative explanation
+    - tool-call: run_query → tool-result: SQL results
+    - tool-call: generate_artifact → data part: chart spec
+    - tool-call: explain_lineage → tool-result: provenance chain
+    - tool-call: run_analysis_script (needsApproval) → pauses for approval
+```
+
+### POST /api/projects/:id/pipeline/trigger
+
+Triggers agent for a specific node action (connect sources to mapping node, run harmonization).
+
+```
+Request:
+  { nodeId: string, action: "map" | "harmonize" }
+
+Response:
+  Content-Type: text/event-stream (Vercel AI SDK data stream)
+  Stream contents vary by action (mapping proposals, harmonization progress)
+```
+
+### POST /api/conversations/:id/approve
+
+Sends approval or rejection for a pending tool call.
+
+```
+Request:
+  { toolCallId: string, approved: boolean, feedback?: string }
+
+Response:
+  { acknowledged: true }
+  (agent resumes on the existing SSE stream)
 ```
 
 ### GET /api/dashboard
 
-Fetches current dashboard state.
+Fetches current dashboard state (pinned artifacts + quality alerts).
 
 ```
 Response:
@@ -382,83 +414,68 @@ Response:
   }
 ```
 
+### Additional Routes
+
+| Route | Purpose |
+|-------|---------|
+| `CRUD /api/projects` | Project management + settings |
+| `GET /api/mappings?projectId=` | Fetch mappings for a project |
+| `PATCH /api/mappings/:id` | Update a single mapping |
+| `POST /api/mappings/bulk-accept` | Auto-accept above threshold |
+| `GET /api/projects/:id/semantic` | Get semantic layer |
+| `GET /api/projects/:id/conversations` | List conversations |
+| `POST /api/projects/:id/artifacts/:id/pin` | Pin artifact to dashboard |
+
 ---
 
 ## 5. Agent Tool Specifications
 
-CareMap uses a single unified agent with access to all tools. The agent adapts its tool usage based on the user's context and request.
+CareMap uses a single unified agent (Vercel AI SDK 6 `ToolLoopAgent`) with access to all tools. The agent adapts its tool usage based on trigger context. Full details in `docs/06-backend-architecture.md` §3.3.
 
-### Data Engineering Tools
+### Pipeline Tools (node-triggered)
 
-**profileSource** — Takes parsed file data (column names, sample rows) and the canonical model definition. Returns structured profiling for each column: inferred type, semantic label, domain, confidence, quality flags. Uses LLM structured output.
+| Tool | Approval | Execution Tier | Description |
+|------|----------|---------------|-------------|
+| `parse_file` | auto | Native TS | Parse CSV/Excel. Returns columns, row count, sample rows, encoding. |
+| `profile_columns` | auto | Native TS + LLM | **Phase 1:** Native TS computes stats (nulls, uniques, distributions). **Phase 2:** LLM interprets stats semantically (labels, domains, flags). |
+| `suggest_cleaning` | auto | LLM | Propose cleaning plan using a **fixed function library** (parseDate, fillNulls, normalizeString, etc). Returns structured plan, not arbitrary code. |
+| `execute_cleaning` | **approval** | Native TS | Apply approved cleaning plan using deterministic TS functions. |
+| `propose_mappings` | auto | LLM | Map source columns to canonical schema with confidence and reasoning. |
+| `confirm_mappings` | **approval** | Native TS | Write accepted mappings to DB. Auto-accept above threshold. |
+| `run_harmonization` | **approval** | Native TS + SQL | Transform rows per mappings, batch insert into canonical tables. |
 
-**detectDomain** — Takes profiling results and classifies the overall source into a clinical domain (care_assessments, lab_results, vital_signs, etc.). Returns domain label and confidence.
+### Analyst Tools (chat-triggered)
 
-**proposeMappings** — Takes source profile and canonical model definition. Returns mapping suggestions: source column → target table.column, with confidence and reasoning. When multiple sources are provided, also detects overlapping entities and proposes a unified model.
-
-**buildSemanticModel** — Takes confirmed mappings from one or more sources. Generates or updates the semantic layer in Supabase: creates/updates `semantic_entities`, `semantic_fields`, and `semantic_joins` rows.
-
-### Analysis Tools
-
-**readSemanticLayer** — Reads and explores the semantic layer metadata to discover available entities, fields, and joins.
-
-**executeSQL** — Takes a SQL query string and an explanation. Executes against Supabase. Returns result rows (limited to 1000) and metadata (row count, execution time).
-
-**generateChart** — Takes query results, chart type, title, axis labels. Returns a Recharts-compatible JSON specification rendered on the client.
+| Tool | Approval | Execution Tier | Description |
+|------|----------|---------------|-------------|
+| `run_query` | auto | Supabase SQL | Read-only SQL against harmonized store, project-scoped. |
+| `generate_artifact` | auto | LLM | Generate chart spec from query results. Emitted as structured data part. |
+| `explain_lineage` | auto | Supabase SQL | Trace target column → mapping → source file provenance chain. |
+| `run_analysis_script` | **approval** | E2B Sandbox | Complex analytics (correlations, regressions) in isolated Python. Escape hatch only. |
 
 ### Shared Tools
 
-**runQualityCheck** — Takes a source file or harmonized table. Returns quality metrics: null rates per column, out-of-range values, duplicate detection, format inconsistencies.
-
-**explainLineage** — Takes a table name and field name. Queries `field_mappings` and `source_files` tables. Returns the chain: source file → source column → mapping rule → transformation → canonical field.
+| Tool | Approval | Execution Tier | Description |
+|------|----------|---------------|-------------|
+| `run_quality_check` | auto | Native TS + SQL | Post-harmonization validation: nulls, ranges, referential integrity. |
+| `update_semantic_layer` | auto | Supabase | Write/update semantic entities, fields, joins after harmonization. |
 
 ---
 
-## 6. Sandbox Hydration Process
+## 6. Semantic Context Assembly
 
-When the analyst agent receives a query:
+When the agent is invoked, the backend assembles the project's full knowledge into the system prompt:
 
-1. API route queries Supabase for all rows in `semantic_entities`, `semantic_fields`, and `semantic_joins`.
-2. Serializes them into YAML files:
-   - `catalog.yml` — entity index with descriptions.
-   - `entities/{entity_name}.yml` — per-entity file with fields, joins, example questions.
-3. Writes these files into the Vercel Sandbox filesystem.
-4. Agent is given shell access to the sandbox.
-5. Agent explores using `cat semantic/catalog.yml`, `grep -r "fall_risk" semantic/`, etc.
-6. Agent builds SQL based on discovered schema.
-7. Agent executes SQL against Supabase via the `executeSQL` tool.
-8. Sandbox is destroyed after the conversation ends.
+1. **Project metadata** — name, description, creation date
+2. **Source files** — filename, row count, column count, processing status
+3. **Source profiles** — column → type, semantic label, domain, quality flags, sample values
+4. **Field mappings** — source → target, status, confidence, transformation
+5. **Semantic entities** — canonical tables available for querying, with descriptions
+6. **Semantic joins** — how canonical tables relate to each other
+7. **Pipeline state** — which nodes exist, their type and status
+8. **Quality alerts** — recent unacknowledged issues
 
-Example hydrated entity file:
-
-```yaml
-entity: care_assessments
-description: >
-  Standardized nursing assessments covering mobility, fall risk,
-  nutrition, pain, and pressure ulcer risk.
-sql_table_name: care_assessments
-fields:
-  - name: assessment_type
-    sql: care_assessments.assessment_type
-    type: string
-    description: "One of: mobility, fall_risk, nutrition, pain, pressure_ulcer"
-  - name: score
-    sql: care_assessments.score
-    type: number
-    description: "Normalized score on the assessment's native scale"
-  - name: ward
-    sql: encounters.ward
-    type: string
-    description: "Joined from encounters table"
-joins:
-  - entity: encounters
-    sql: "care_assessments.encounter_id = encounters.id"
-  - entity: patients
-    sql: "care_assessments.patient_id = patients.id"
-example_questions:
-  - "What is the average fall risk score by ward?"
-  - "Show me patients with mobility score below 2"
-```
+This context enables the chat agent to translate natural language into accurate SQL without a separate retrieval or sandbox hydration step. The semantic layer is injected directly into the context window.
 
 ---
 
