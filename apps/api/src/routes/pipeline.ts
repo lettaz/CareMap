@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { createAgentStreamResponse } from "../services/agent.js";
 import { supabase } from "../config/supabase.js";
+import { listHarmonizedTables } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
 
 const triggerSchema = z.object({
@@ -12,6 +13,7 @@ const triggerSchema = z.object({
     "clean_requested",
     "sources_connected",
     "harmonize_requested",
+    "export_requested",
   ]),
   context: z.record(z.unknown()).optional(),
 });
@@ -82,6 +84,16 @@ async function resolveSourceFilename(sourceFileId: string): Promise<string> {
   return (data?.filename as string) ?? "unknown";
 }
 
+async function resolveNodeConfig(nodeId: string): Promise<Record<string, unknown> | null> {
+  const { data } = await supabase
+    .from("pipeline_nodes")
+    .select("config")
+    .eq("id", nodeId)
+    .single();
+
+  return (data?.config as Record<string, unknown>) ?? null;
+}
+
 export const pipelineRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Params: { projectId: string } }>("/:projectId/pipeline/trigger", async (request, reply) => {
     const { projectId } = request.params;
@@ -140,11 +152,24 @@ export const pipelineRoutes: FastifyPluginAsync = async (app) => {
         userMessage = `Project ID: ${projectId}. The user wants to harmonize data via node ${nodeId}. Please run harmonization using confirmed mappings. Mapping IDs: ${JSON.stringify(mappingIds)}`;
         break;
       }
+
+      case "export_requested": {
+        const nodeConfig = await resolveNodeConfig(nodeId);
+        const format = (nodeConfig?.format as string) ?? "csv";
+        const tables = await listHarmonizedTables(projectId);
+        if (!tables.length) throw new ValidationError("No harmonized tables found for export");
+
+        userMessage =
+          `Project ID: ${projectId}. The user wants to export harmonized data from output node ${nodeId}. ` +
+          `Available harmonized tables: ${JSON.stringify(tables)}. ` +
+          `Desired format: ${format}. ` +
+          `Read the harmonized data using run_query or run_script, then use export_data with format="${format}" to create a downloadable file.`;
+        break;
+      }
     }
 
     const response = await createAgentStreamResponse({
       projectId,
-      mode: "pipeline",
       messages: [{ role: "user", content: userMessage }],
     });
 

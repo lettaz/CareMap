@@ -12,6 +12,7 @@ import { runQualityCheckTool } from "./run-quality-check.js";
 import { runScriptTool } from "./run-script.js";
 import { updateSemanticTool } from "./update-semantic.js";
 import { proposeTargetSchemaTool } from "./propose-schema.js";
+import { exportDataTool } from "./export-data.js";
 
 export const pipelineTools = {
   parse_file: parseFileTool,
@@ -29,6 +30,7 @@ export const analystTools = {
   generate_artifact: generateArtifactTool,
   explain_lineage: explainLineageTool,
   run_script: runScriptTool,
+  export_data: exportDataTool,
 };
 
 export const sharedTools = {

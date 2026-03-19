@@ -91,4 +91,17 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     if (error) throw new NotFoundError("Project", id);
     return reply.status(204).send();
   });
+
+  app.get<{ Params: { projectId: string } }>("/:projectId/sources", async (request) => {
+    const { projectId } = request.params;
+
+    const { data, error } = await supabase
+      .from("source_files")
+      .select("id, filename, file_type, row_count, column_count, status, storage_path, uploaded_at")
+      .eq("project_id", projectId)
+      .order("uploaded_at", { ascending: false });
+
+    if (error) throw new Error(`Failed to fetch sources: ${error.message}`);
+    return data ?? [];
+  });
 };

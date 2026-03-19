@@ -104,11 +104,12 @@ function normalizeColumnNames(
 
 // ── Parsing ──
 
-export function parseCsv(content: string): ParseResult {
+export function parseCsv(content: string, delimiter?: string): ParseResult {
   const parsed = Papa.parse<Record<string, unknown>>(content, {
     header: true,
     skipEmptyLines: true,
     dynamicTyping: true,
+    delimiter: delimiter || undefined,
   });
 
   const rawColumns = parsed.meta.fields ?? [];

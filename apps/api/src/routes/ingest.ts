@@ -19,14 +19,18 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
 
     const allowedMimes = [
       "text/csv",
+      "text/plain",
+      "text/tab-separated-values",
       "application/vnd.ms-excel",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ];
-    const isAllowed = allowedMimes.includes(file.mimetype) || file.filename.endsWith(".csv");
-    if (!isAllowed) throw new ValidationError("Unsupported file type. Accepted: CSV, XLSX");
+    const isAllowed =
+      allowedMimes.includes(file.mimetype) || /\.(csv|tsv|txt|xlsx|xls)$/i.test(file.filename);
+    if (!isAllowed) throw new ValidationError("Unsupported file type. Accepted: CSV, TSV, TXT, XLSX");
 
     const buffer = await file.toBuffer();
-    const isExcel = file.filename.endsWith(".xlsx") || file.filename.endsWith(".xls");
+    const isExcel = /\.(xlsx|xls)$/i.test(file.filename);
+    const isTsv = /\.(tsv)$/i.test(file.filename);
 
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -35,13 +39,16 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
     });
 
     // ── Step 1: Parse file ──
+    const fileType = isExcel ? "xlsx" : isTsv ? "tsv" : "csv";
     const parseStep = await logStep({
       projectId, nodeId, stepType: "parse_file",
-      inputSummary: { filename: file.filename, fileType: isExcel ? "xlsx" : "csv", sizeBytes: buffer.length },
+      inputSummary: { filename: file.filename, fileType, sizeBytes: buffer.length },
     });
     sseWrite(reply.raw, "step", { stepType: "parse_file", status: "running" });
 
-    const parsed = isExcel ? parseExcel(buffer) : parseCsv(buffer.toString("utf-8"));
+    const parsed = isExcel
+      ? parseExcel(buffer)
+      : parseCsv(buffer.toString("utf-8"), isTsv ? "\t" : undefined);
 
     const parseOutput = {
       rowCount: parsed.rowCount,
@@ -57,7 +64,7 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       .insert({
         project_id: projectId,
         filename: file.filename,
-        file_type: isExcel ? "xlsx" : "csv",
+        file_type: fileType,
         row_count: parsed.rowCount,
         column_count: parsed.columns.length,
         storage_path: null,
@@ -71,7 +78,8 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
     if (sfErr || !sourceFile) throw new Error(`Failed to create source file record: ${sfErr?.message}`);
 
     const storagePath = rawPath(projectId, sourceFile.id);
-    await uploadFile(storagePath, buffer, isExcel ? "application/octet-stream" : "text/csv");
+    const uploadMime = isExcel ? "application/octet-stream" : isTsv ? "text/tab-separated-values" : "text/csv";
+    await uploadFile(storagePath, buffer, uploadMime);
     await supabase.from("source_files").update({ storage_path: storagePath }).eq("id", sourceFile.id);
 
     await supabase

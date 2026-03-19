@@ -1,32 +1,60 @@
 import { streamText, ToolLoopAgent, stepCountIs, createAgentUIStreamResponse } from "ai";
 import type { UIMessage } from "ai";
 import { getModel } from "../config/ai.js";
-import { allTools, pipelineTools, sharedTools } from "./tools/index.js";
+import { allTools } from "./tools/index.js";
 import { getSemanticContext } from "./semantic.js";
 
-type AgentMode = "pipeline" | "conversation";
+const BASE_SYSTEM_PROMPT = `You are CareMap AI, an intelligent assistant for healthcare data harmonization and analysis.
 
-const BASE_SYSTEM_PROMPT = `You are CareMap AI, an intelligent assistant for healthcare data harmonization.
+You seamlessly handle both data engineering and data analysis tasks within the same conversation.
+Decide what to do based on the user's message — there is no mode switch.
 
-You operate in two modes:
-1. **Pipeline mode**: You act as a data engineer — profiling, cleaning, mapping, and harmonizing clinical datasets.
-2. **Conversation mode**: You act as a data analyst — querying harmonized data, generating visualizations, and explaining lineage.
-
-Key behaviors:
-- Always show your reasoning. Reference specific tables, columns, and data sources.
-- Column names in source data may be in German — translate and explain.
-- For chart suggestions, use the generate_artifact tool.
+## Data Engineering (Pipeline) Capabilities
+When the user uploads files or asks about profiling, cleaning, mapping, or harmonizing:
+- Profile columns, propose cleaning plans, propose target schemas, map columns, and run harmonization.
 - For destructive operations (cleaning, harmonizing), explain what you plan to do before executing.
-- When querying data, write DuckDB SQL for structured queries or pandas for complex analytics.
+- Column names in source data may be in German — translate and explain.
 
-Error handling:
+## Data Analysis (Analyst) Capabilities
+When the user asks questions about their data, requests insights, or wants visualizations:
+
+### Choosing SQL vs Python
+- Use **DuckDB SQL** via run_query (type: "sql") for: aggregations, filtering, grouping, joins, counts, averages, distributions.
+- Use **Python/pandas** via run_query (type: "python") for: correlations, pivots, complex reshaping, time-series resampling.
+- Use **run_script** for: machine learning (sklearn), statistical tests (scipy.stats), custom models, predictions. The sandbox has pandas, numpy, scipy, and scikit-learn available.
+
+### Query Guidelines
+- Always use table and column names from the Harmonized Tables section below. Never guess or hallucinate names.
+- Use the Detected Joins section to know which tables can be joined and on which column.
+- For the "harmonized" stage, files are loaded as DuckDB tables (SQL) or into a \`dataframes\` dict (Python) matching the entity names.
+- For the "source" stage, pass specific sourceFileIds to query raw/cleaned files.
+- Prefer SQL for simple questions — it is faster and more transparent.
+
+### Response Format
+- **Lead with a written insight** summarizing the answer in plain language before showing data.
+- When returning tabular results, present them clearly with column context.
+- When results lend themselves to visualization (trends, distributions, comparisons), call generate_artifact to produce a chart.
+- When the user asks for a download or export, call export_data to produce a CSV with a download link.
+- Always include the generated code (SQL or Python) in your response so the user sees exactly what ran.
+
+### Predictions and ML
+- When the user asks for predictions, forecasts, risk scoring, or correlation analysis, use run_script.
+- The E2B sandbox has scikit-learn pre-installed. You can train models, evaluate them, and return predictions.
+- Explain the model choice, features used, and accuracy metrics alongside results.
+
+## General Behaviors
+- Always show your reasoning. Reference specific tables, columns, and data sources.
+- When explaining data lineage, use explain_lineage to trace a column back to its source.
+- Provide actionable insights, not just raw numbers.
+
+## Error Handling
 - Tool results include a "success" field. If success is false, read the "error" and "suggestion" fields.
 - If "retryable" is true, you MAY retry the same tool call once. If it fails again, report the error to the user.
 - Never silently ignore a failed tool result. Always inform the user what happened and what they can do.
 - If a tool fails due to missing prerequisites (no schema, no profiles, etc.), guide the user through the required steps.
 `;
 
-async function buildSystemPrompt(projectId: string, mode: AgentMode): Promise<string> {
+async function buildSystemPrompt(projectId: string): Promise<string> {
   const ctx = await getSemanticContext(projectId);
 
   const sections = [BASE_SYSTEM_PROMPT];
@@ -55,7 +83,7 @@ async function buildSystemPrompt(projectId: string, mode: AgentMode): Promise<st
   }
 
   if (ctx.entities.length > 0) {
-    sections.push("\n## Harmonized Tables (Parquet)");
+    sections.push("\n## Harmonized Tables");
     for (const e of ctx.entities) {
       const entityFields = ctx.fields.filter((f) => f.entity_id === e.id);
       sections.push(`- ${e.entity_name}: ${e.row_count ?? "?"} rows @ ${e.parquet_path}`);
@@ -88,42 +116,34 @@ async function buildSystemPrompt(projectId: string, mode: AgentMode): Promise<st
     }
   }
 
-  if (mode === "pipeline") {
-    sections.push("\n## Mode: Pipeline\nYou have access to pipeline tools for profiling, cleaning, mapping, and harmonizing data.");
-  } else {
-    sections.push("\n## Mode: Conversation\nYou have access to analyst tools for querying data, generating charts, and explaining lineage. You can also access pipeline tools if the user needs to modify their pipeline.");
-  }
+  sections.push(
+    "\n## Available Tools\n" +
+    "You have all pipeline and analyst tools. Use whichever tools are appropriate for the user's request.\n" +
+    "Pipeline: parse_file, profile_columns, suggest_cleaning, execute_cleaning, propose_target_schema, propose_mappings, confirm_mappings, run_harmonization\n" +
+    "Analyst: run_query, run_script, generate_artifact, explain_lineage, export_data\n" +
+    "Shared: run_quality_check, update_semantic_layer",
+  );
 
   return sections.join("\n");
 }
 
-function getToolsForMode(mode: AgentMode) {
-  if (mode === "pipeline") {
-    return { ...pipelineTools, ...sharedTools };
-  }
-  return allTools;
-}
-
-export function createAgent(_projectId: string, mode: AgentMode, systemPrompt: string) {
-  const tools = getToolsForMode(mode);
-
+export function createAgent(systemPrompt: string) {
   return new ToolLoopAgent({
     model: getModel(),
     instructions: systemPrompt,
-    tools,
+    tools: allTools,
     stopWhen: stepCountIs(20),
   });
 }
 
 export interface AgentStreamOptions {
   projectId: string;
-  mode: AgentMode;
   messages: Array<{ role: "user" | "assistant" | "system"; content: string }>;
 }
 
 export async function createAgentStreamResponse(opts: AgentStreamOptions): Promise<Response> {
-  const systemPrompt = await buildSystemPrompt(opts.projectId, opts.mode);
-  const agent = createAgent(opts.projectId, opts.mode, systemPrompt);
+  const systemPrompt = await buildSystemPrompt(opts.projectId);
+  const agent = createAgent(systemPrompt);
 
   const uiMessages: UIMessage[] = opts.messages.map((m, i) => ({
     id: `msg-${i}`,
@@ -140,14 +160,13 @@ export async function createAgentStreamResponse(opts: AgentStreamOptions): Promi
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function createSimpleStream(opts: AgentStreamOptions): Promise<any> {
-  const systemPrompt = await buildSystemPrompt(opts.projectId, opts.mode);
-  const tools = getToolsForMode(opts.mode);
+  const systemPrompt = await buildSystemPrompt(opts.projectId);
 
   const result = streamText({
     model: getModel(),
     system: systemPrompt,
     messages: opts.messages,
-    tools,
+    tools: allTools,
     stopWhen: stepCountIs(20),
     temperature: 0.3,
   });

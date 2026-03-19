@@ -15,6 +15,7 @@ export interface QueryResult {
   rows: unknown[];
   rowCount: number;
   columns?: string[];
+  generatedCode: string;
   error?: string;
   executionTimeMs: number;
 }
@@ -103,20 +104,22 @@ if '_result' in dir():
 
 export async function executeQuery(request: QueryRequest): Promise<QueryResult> {
   const start = Date.now();
+  const userCode = request.code;
   const storagePaths = await resolveStoragePaths(request.projectId, request.stage, request.sourceFileIds);
 
   if (storagePaths.length === 0) {
     return {
       rows: [],
       rowCount: 0,
+      generatedCode: userCode,
       error: `No data files found for stage "${request.stage}"`,
       executionTimeMs: Date.now() - start,
     };
   }
 
   const pythonCode = request.type === "sql"
-    ? buildSqlQueryCode(request.code)
-    : buildPythonQueryCode(request.code);
+    ? buildSqlQueryCode(userCode)
+    : buildPythonQueryCode(userCode);
 
   const result = await executeWithFileUpload(pythonCode, storagePaths, {
     timeoutMs: 30_000,
@@ -127,6 +130,7 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResult> 
     return {
       rows: [],
       rowCount: 0,
+      generatedCode: userCode,
       error: result.stderr || "Query execution failed",
       executionTimeMs: Date.now() - start,
     };
@@ -137,6 +141,7 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResult> 
     return {
       rows: [],
       rowCount: 0,
+      generatedCode: userCode,
       error: "No output from query",
       executionTimeMs: Date.now() - start,
     };
@@ -145,6 +150,7 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResult> 
   const parsed = JSON.parse(outputLine) as { rows: unknown[]; rowCount: number; columns?: string[] };
   return {
     ...parsed,
+    generatedCode: userCode,
     executionTimeMs: Date.now() - start,
   };
 }

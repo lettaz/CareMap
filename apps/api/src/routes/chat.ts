@@ -22,7 +22,6 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
     const response = await createAgentStreamResponse({
       projectId,
-      mode: "conversation",
       messages,
     });
 

@@ -72,3 +72,12 @@ export async function listFiles(prefix: string): Promise<string[]> {
   if (error) throw new Error(`Storage listing failed: ${error.message}`);
   return (data ?? []).map((f) => `${prefix}/${f.name}`);
 }
+
+export function exportPath(projectId: string, filename: string): string {
+  return `exports/${projectId}/${Date.now()}_${filename}`;
+}
+
+export async function listHarmonizedTables(projectId: string): Promise<string[]> {
+  const files = await listFiles(harmonizedDir(projectId));
+  return files.filter((f) => !f.endsWith("manifest.json"));
+}
