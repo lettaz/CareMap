@@ -3,7 +3,6 @@ import { z } from "zod";
 import { generateText } from "ai";
 import { getModel } from "../../config/ai.js";
 import { supabase } from "../../config/supabase.js";
-import { AIServiceError } from "../../lib/errors.js";
 
 const SCHEMA_PROPOSAL_PROMPT = `You are a data modeling assistant for CareMap, a data harmonization platform.
 
