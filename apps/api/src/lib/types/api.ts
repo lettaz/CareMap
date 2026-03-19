@@ -91,6 +91,7 @@ export interface DashboardResponse {
     id: string;
     title: string;
     queryText: string;
+    queryCode: string;
     chartSpec: Record<string, unknown>;
     pinnedAt: string;
   }>;
@@ -106,6 +107,7 @@ export interface DashboardResponse {
     id: string;
     filename: string;
     rowCount: number;
+    status: string;
     mappedFields: number;
     unmappedFields: number;
   }>;

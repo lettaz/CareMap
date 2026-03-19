@@ -1,27 +1,25 @@
+/**
+ * Supabase database types — metadata tables only.
+ * Clinical data lives as Parquet files in Supabase Storage,
+ * queried via DuckDB in E2B sandboxes.
+ */
+
 export interface Database {
   public: {
     Tables: {
-      patients: { Row: PatientRow; Insert: PatientInsert };
-      encounters: { Row: EncounterRow; Insert: EncounterInsert };
-      diagnoses: { Row: DiagnosisRow; Insert: DiagnosisInsert };
-      lab_results: { Row: LabResultRow; Insert: LabResultInsert };
-      vital_signs: { Row: VitalSignRow; Insert: VitalSignInsert };
-      medications: { Row: MedicationRow; Insert: MedicationInsert };
-      care_assessments: { Row: CareAssessmentRow; Insert: CareAssessmentInsert };
-      care_interventions: { Row: CareInterventionRow; Insert: CareInterventionInsert };
-      sensor_readings: { Row: SensorReadingRow; Insert: SensorReadingInsert };
-      staff_schedules: { Row: StaffScheduleRow; Insert: StaffScheduleInsert };
+      projects: { Row: ProjectRow; Insert: ProjectInsert };
       source_files: { Row: SourceFileRow; Insert: SourceFileInsert };
       source_profiles: { Row: SourceProfileRow; Insert: SourceProfileInsert };
       field_mappings: { Row: FieldMappingRow; Insert: FieldMappingInsert };
+      pipeline_nodes: { Row: PipelineNodeRow; Insert: PipelineNodeInsert };
+      pipeline_edges: { Row: PipelineEdgeRow; Insert: PipelineEdgeInsert };
       semantic_entities: { Row: SemanticEntityRow; Insert: SemanticEntityInsert };
       semantic_fields: { Row: SemanticFieldRow; Insert: SemanticFieldInsert };
       semantic_joins: { Row: SemanticJoinRow; Insert: SemanticJoinInsert };
-      pipeline_nodes: { Row: PipelineNodeRow; Insert: PipelineNodeInsert };
-      pipeline_edges: { Row: PipelineEdgeRow; Insert: PipelineEdgeInsert };
       pinned_widgets: { Row: PinnedWidgetRow; Insert: PinnedWidgetInsert };
       quality_alerts: { Row: QualityAlertRow; Insert: QualityAlertInsert };
-      projects: { Row: ProjectRow; Insert: ProjectInsert };
+      conversations: { Row: ConversationRow; Insert: ConversationInsert };
+      conversation_messages: { Row: ConversationMessageRow; Insert: ConversationMessageInsert };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -29,126 +27,21 @@ export interface Database {
   };
 }
 
-// ── Clinical Tables ──
-
-export interface PatientRow {
-  id: string;
-  external_id: string;
-  birth_year: number | null;
-  gender: string | null;
-  created_at: string;
-}
-export type PatientInsert = Omit<PatientRow, "id" | "created_at">;
-
-export interface EncounterRow {
-  id: string;
-  patient_id: string;
-  type: string;
-  ward: string | null;
-  start_date: string | null;
-  end_date: string | null;
-}
-export type EncounterInsert = Omit<EncounterRow, "id">;
-
-export interface DiagnosisRow {
-  id: string;
-  encounter_id: string;
-  code: string;
-  code_system: string | null;
-  description: string | null;
-  date: string | null;
-}
-export type DiagnosisInsert = Omit<DiagnosisRow, "id">;
-
-export interface LabResultRow {
-  id: string;
-  encounter_id: string;
-  test_code: string | null;
-  test_name: string;
-  value: number;
-  unit: string;
-  reference_range: string | null;
-  measured_at: string;
-}
-export type LabResultInsert = Omit<LabResultRow, "id">;
-
-export interface VitalSignRow {
-  id: string;
-  encounter_id: string;
-  type: string;
-  value: number;
-  unit: string;
-  measured_at: string;
-}
-export type VitalSignInsert = Omit<VitalSignRow, "id">;
-
-export interface MedicationRow {
-  id: string;
-  encounter_id: string;
-  drug_name: string;
-  drug_code: string | null;
-  dose: number | null;
-  unit: string | null;
-  frequency: string | null;
-  start_date: string | null;
-  end_date: string | null;
-}
-export type MedicationInsert = Omit<MedicationRow, "id">;
-
-export interface CareAssessmentRow {
-  id: string;
-  encounter_id: string;
-  patient_id: string;
-  assessment_type: string;
-  score: number;
-  scale_min: number | null;
-  scale_max: number | null;
-  assessed_at: string;
-  assessor: string | null;
-}
-export type CareAssessmentInsert = Omit<CareAssessmentRow, "id">;
-
-export interface CareInterventionRow {
-  id: string;
-  encounter_id: string;
-  intervention_type: string;
-  description: string | null;
-  start_date: string | null;
-  end_date: string | null;
-  status: string;
-}
-export type CareInterventionInsert = Omit<CareInterventionRow, "id">;
-
-export interface SensorReadingRow {
-  id: string;
-  patient_id: string;
-  sensor_type: string;
-  value: number;
-  unit: string;
-  measured_at: string;
-}
-export type SensorReadingInsert = Omit<SensorReadingRow, "id">;
-
-export interface StaffScheduleRow {
-  id: string;
-  staff_id: string;
-  ward: string;
-  role: string;
-  shift_start: string;
-  shift_end: string;
-}
-export type StaffScheduleInsert = Omit<StaffScheduleRow, "id">;
-
-// ── Pipeline & Metadata Tables ──
+// ── Projects ──
 
 export interface ProjectRow {
   id: string;
   name: string;
   description: string | null;
+  settings: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
 export type ProjectInsert = Omit<ProjectRow, "id" | "created_at" | "updated_at">;
+
+// ── Source Files (references to Supabase Storage) ──
+
+export type SourceFileStatus = "raw" | "profiling" | "profiled" | "cleaning" | "clean" | "error";
 
 export interface SourceFileRow {
   id: string;
@@ -160,8 +53,12 @@ export interface SourceFileRow {
   column_count: number | null;
   raw_profile: Record<string, unknown> | null;
   storage_path: string | null;
+  cleaned_path: string | null;
+  status: SourceFileStatus;
 }
 export type SourceFileInsert = Omit<SourceFileRow, "id" | "uploaded_at">;
+
+// ── Source Profiles (column-level metadata) ──
 
 export interface SourceProfileRow {
   id: string;
@@ -176,6 +73,8 @@ export interface SourceProfileRow {
   user_corrected: boolean;
 }
 export type SourceProfileInsert = Omit<SourceProfileRow, "id">;
+
+// ── Field Mappings ──
 
 export interface FieldMappingRow {
   id: string;
@@ -193,34 +92,7 @@ export interface FieldMappingRow {
 }
 export type FieldMappingInsert = Omit<FieldMappingRow, "id">;
 
-export interface SemanticEntityRow {
-  id: string;
-  project_id: string;
-  entity_name: string;
-  description: string | null;
-  sql_table_name: string;
-  created_from: string[];
-  updated_at: string;
-}
-export type SemanticEntityInsert = Omit<SemanticEntityRow, "id" | "updated_at">;
-
-export interface SemanticFieldRow {
-  id: string;
-  entity_id: string;
-  field_name: string;
-  sql_expression: string;
-  data_type: string;
-  description: string | null;
-}
-export type SemanticFieldInsert = Omit<SemanticFieldRow, "id">;
-
-export interface SemanticJoinRow {
-  id: string;
-  from_entity_id: string;
-  to_entity_id: string;
-  join_sql: string;
-}
-export type SemanticJoinInsert = Omit<SemanticJoinRow, "id">;
+// ── Pipeline State ──
 
 export interface PipelineNodeRow {
   id: string;
@@ -241,12 +113,45 @@ export interface PipelineEdgeRow {
 }
 export type PipelineEdgeInsert = Omit<PipelineEdgeRow, "id">;
 
+// ── Semantic Layer (describes Parquet files in Storage) ──
+
+export interface SemanticEntityRow {
+  id: string;
+  project_id: string;
+  entity_name: string;
+  description: string | null;
+  parquet_path: string;
+  row_count: number | null;
+  created_from: string[];
+  updated_at: string;
+}
+export type SemanticEntityInsert = Omit<SemanticEntityRow, "id" | "updated_at">;
+
+export interface SemanticFieldRow {
+  id: string;
+  entity_id: string;
+  field_name: string;
+  data_type: string;
+  description: string | null;
+}
+export type SemanticFieldInsert = Omit<SemanticFieldRow, "id">;
+
+export interface SemanticJoinRow {
+  id: string;
+  from_entity_id: string;
+  to_entity_id: string;
+  join_column: string;
+}
+export type SemanticJoinInsert = Omit<SemanticJoinRow, "id">;
+
+// ── Dashboard ──
+
 export interface PinnedWidgetRow {
   id: string;
   project_id: string;
   title: string;
   query_text: string;
-  sql_query: string;
+  query_code: string;
   chart_spec: Record<string, unknown>;
   pinned_at: string;
 }
@@ -264,3 +169,26 @@ export interface QualityAlertRow {
   created_at: string;
 }
 export type QualityAlertInsert = Omit<QualityAlertRow, "id" | "created_at">;
+
+// ── Conversations ──
+
+export interface ConversationRow {
+  id: string;
+  project_id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type ConversationInsert = Omit<ConversationRow, "id" | "created_at" | "updated_at">;
+
+export interface ConversationMessageRow {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string | null;
+  tool_calls: Record<string, unknown> | null;
+  tool_results: Record<string, unknown> | null;
+  artifacts: Record<string, unknown> | null;
+  created_at: string;
+}
+export type ConversationMessageInsert = Omit<ConversationMessageRow, "id" | "created_at">;

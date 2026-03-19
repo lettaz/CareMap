@@ -86,14 +86,18 @@ Data operations follow a priority chain:
 1. **Native TypeScript** — file parsing, statistical profiling (null rates, distributions, type detection), cleaning (date parsing, null handling, dedup), row transformation. No LLM, no sandbox.
 2. **Supabase SQL** — querying the harmonized store, aggregations, quality checks, joins, referential integrity. Uses `execute_readonly_sql` RPC for safe read-only queries.
 3. **LLM Inference** — semantic interpretation (clinical labels, domain mapping), mapping proposals with reasoning, cleaning plan suggestions, chat responses. The LLM reasons about data; it does not process it directly.
-4. **E2B Sandbox** — activated only when the user requests complex statistical analysis (correlations, regressions, time series) or custom scripts that exceed native TS + SQL capabilities. Always requires user approval.
+4. **E2B Sandbox** — the primary execution environment for all data manipulation: cleaning (pandas), harmonization (pandas → Parquet), querying (DuckDB on Parquet → JSON), and complex analytics.
+
+### Key Architectural Decision: Metadata vs Data Separation
+
+Supabase Postgres stores **metadata only** — projects, profiles, mappings, pipeline state, conversations, semantic layer. Never the actual data rows. All data files (raw uploads, cleaned outputs, harmonized Parquets) live in **Supabase Storage**. Analytical queries run in **E2B sandboxes** using DuckDB against Parquet files, returning JSON results. No canonical clinical tables in Postgres.
 
 ### Key Architectural Decision: Single Contextual AI Agent
 
 CareMap uses a **single unified AI agent** ("CareMap AI") powered by Vercel AI SDK 6's `ToolLoopAgent`. The agent adapts its behavior based on trigger context:
 
 - **Pipeline mode** (triggered by node actions): acts as a data engineer — profiles, cleans, maps, transforms
-- **Conversation mode** (triggered by chat input): acts as a data analyst — queries the harmonized store, generates artifacts, explains lineage
+- **Conversation mode** (triggered by chat input): acts as a data analyst — queries Parquet store via DuckDB, generates artifacts, explains lineage
 
 Same agent, same tools, same semantic context. The system prompt adapts a preamble based on the trigger type.
 
@@ -102,17 +106,15 @@ The conversation UI follows a **document-stream pattern** inspired by Zeit AI:
 - Agent responses with transparent tool execution steps, rich content, tabbed artifacts (tables, charts), and approval gates
 - Full provenance and reasoning for every AI action
 
-Agent tools: `parse_file`, `profile_columns`, `suggest_cleaning`, `execute_cleaning`, `propose_mappings`, `confirm_mappings`, `run_harmonization`, `run_query`, `generate_artifact`, `explain_lineage`, `run_quality_check`, `update_semantic_layer`, `run_analysis_script`. All tools share a semantic layer stored in Supabase.
+Agent tools: `parse_file`, `profile_columns`, `suggest_cleaning`, `execute_cleaning`, `propose_mappings`, `confirm_mappings`, `run_harmonization`, `run_query`, `generate_artifact`, `explain_lineage`, `run_quality_check`, `update_semantic_layer`, `run_script`. All tools share a semantic layer stored in Supabase.
 
 ### Key Architectural Decision: Dynamic Semantic Layer
 
 The semantic layer is generated dynamically from user uploads and confirmed mappings. It is stored in Supabase (`semantic_entities`, `semantic_fields`, `semantic_joins`) and assembled into the agent's system prompt before every invocation.
 
-**Write path:** Source upload → native profiling → LLM interpretation → profiles saved to `source_profiles` → user confirms mappings → data harmonized to canonical tables → `update_semantic_layer` tool writes entities, fields, joins to Supabase.
+**Write path:** Source upload → native profiling → LLM interpretation → profiles saved → user confirms mappings → harmonization runs in E2B (pandas → Parquet) → Parquets uploaded to Supabase Storage → `update_semantic_layer` reads manifest.json and writes entities, fields, joins.
 
-**Read path:** User asks a question in chat → backend assembles semantic context from Supabase → agent receives it as part of system prompt → agent writes SQL using entity/field names → executes via `run_query` → streams results + optional chart artifact.
-
-No sandbox is needed for the read path. The semantic layer is injected directly into the agent's context window.
+**Read path:** User asks a question in chat → backend assembles semantic context from Supabase metadata → agent writes DuckDB SQL or pandas code → `run_query` spins up E2B sandbox → loads Parquets → executes → returns JSON → agent formats response + optional chart artifact.
 
 ---
 
@@ -133,11 +135,13 @@ No sandbox is needed for the read path. The semantic layer is injected directly 
 | Fonts | Inter + Geist Mono | — | Body and monospace typography |
 | Backend | Fastify | 5.x | REST API server (apps/api workspace) |
 | AI Agent | Vercel AI SDK | 6.x | ToolLoopAgent, tool approval, streaming |
-| Database | Supabase (Postgres + Storage) | — | Canonical store, metadata, pipeline state, file storage |
+| Database | Supabase (Postgres + Storage) | — | Metadata store (profiles, mappings, pipeline state) + file storage (raw, cleaned, harmonized Parquets) |
 | File Parsing | PapaParse | 5.x | CSV parsing (native TS) |
 | File Parsing | xlsx / exceljs | — | Excel parsing (native TS) |
 | Validation | Zod | 3.x | Request/schema validation |
-| Sandbox | E2B Code Interpreter | — | Python sandbox for complex analytics (escape hatch) |
+| Sandbox | E2B Code Interpreter | — | Python sandbox for cleaning, harmonization, querying (pandas + DuckDB) |
+| Analytical Engine | DuckDB (in E2B) | — | SQL queries on Parquet files, no separate database needed |
+| Data Format | Apache Parquet | — | Columnar format for harmonized data in Supabase Storage |
 | Frontend Hosting | Vercel | — | Connected to GitHub repo |
 | Backend Hosting | Railway / Vercel | — | Fastify API deployment |
 
@@ -145,97 +149,28 @@ No sandbox is needed for the read path. The semantic layer is injected directly 
 
 ## 3. Database Schema
 
-### Canonical Clinical Tables
+Supabase Postgres stores **metadata only**. All clinical data lives as Parquet files in Supabase Storage. See `docs/06-backend-architecture.md` §2 for the full data lifecycle and storage bucket structure.
+
+### Canonical Clinical Data (Parquet in Supabase Storage)
+
+Clinical data is NOT stored in Postgres tables. After harmonization, data is written as Parquet files:
 
 ```
-patients
-  id              UUID, PK
-  external_id     TEXT
-  birth_year      INT
-  gender          TEXT
-  created_at      TIMESTAMPTZ
-
-encounters
-  id              UUID, PK
-  patient_id      UUID → patients
-  type            TEXT (inpatient, outpatient, ltc)
-  ward            TEXT
-  start_date      DATE
-  end_date        DATE
-
-diagnoses
-  id              UUID, PK
-  encounter_id    UUID → encounters
-  code            TEXT (ICD-10)
-  code_system     TEXT
-  description     TEXT
-  date            DATE
-
-lab_results
-  id              UUID, PK
-  encounter_id    UUID → encounters
-  test_code       TEXT (LOINC if mapped)
-  test_name       TEXT
-  value           NUMERIC
-  unit            TEXT
-  reference_range TEXT
-  measured_at     TIMESTAMPTZ
-
-vital_signs
-  id              UUID, PK
-  encounter_id    UUID → encounters
-  type            TEXT (heart_rate, blood_pressure, temperature, spo2)
-  value           NUMERIC
-  unit            TEXT
-  measured_at     TIMESTAMPTZ
-
-medications
-  id              UUID, PK
-  encounter_id    UUID → encounters
-  drug_name       TEXT
-  drug_code       TEXT (ATC if mapped)
-  dose            NUMERIC
-  unit            TEXT
-  frequency       TEXT
-  start_date      DATE
-  end_date        DATE
-
-care_assessments
-  id              UUID, PK
-  encounter_id    UUID → encounters
-  patient_id      UUID → patients
-  assessment_type TEXT (mobility, fall_risk, nutrition, pain, pressure_ulcer)
-  score           NUMERIC
-  scale_min       NUMERIC
-  scale_max       NUMERIC
-  assessed_at     TIMESTAMPTZ
-  assessor        TEXT
-
-care_interventions
-  id              UUID, PK
-  encounter_id    UUID → encounters
-  intervention_type TEXT
-  description     TEXT
-  start_date      DATE
-  end_date        DATE
-  status          TEXT (planned, active, completed)
-
-sensor_readings
-  id              UUID, PK
-  patient_id      UUID → patients
-  sensor_type     TEXT
-  value           NUMERIC
-  unit            TEXT
-  measured_at     TIMESTAMPTZ
-
-staff_schedules
-  id              UUID, PK
-  staff_id        TEXT
-  ward            TEXT
-  role            TEXT
-  shift_start     TIMESTAMPTZ
-  shift_end       TIMESTAMPTZ
+Supabase Storage: caremap-files/harmonized/{projectId}/
+  ├── patients.parquet
+  ├── encounters.parquet
+  ├── diagnoses.parquet
+  ├── lab_results.parquet
+  ├── vital_signs.parquet
+  ├── medications.parquet
+  ├── care_assessments.parquet
+  ├── care_interventions.parquet
+  ├── sensor_readings.parquet
+  ├── staff_schedules.parquet
+  └── manifest.json          ← lists tables, row counts, columns
 ```
+
+These files are queried via DuckDB in E2B sandboxes. The schema is flexible — each project's harmonization may produce different tables based on its source data.
 
 ### Semantic Layer Metadata Tables
 
@@ -256,7 +191,8 @@ semantic_entities
   id              UUID, PK
   entity_name     TEXT (e.g., "care_assessments")
   description     TEXT
-  sql_table_name  TEXT
+  parquet_path    TEXT (e.g., "harmonized/{projectId}/care_assessments.parquet")
+  row_count       INT
   created_from    JSONB (list of source_file_ids that contributed)
   updated_at      TIMESTAMPTZ
 
@@ -264,7 +200,6 @@ semantic_fields
   id              UUID, PK
   entity_id       UUID → semantic_entities
   field_name      TEXT
-  sql_expression  TEXT
   data_type       TEXT
   description     TEXT
 
@@ -272,7 +207,7 @@ semantic_joins
   id              UUID, PK
   from_entity_id  UUID → semantic_entities
   to_entity_id    UUID → semantic_entities
-  join_sql        TEXT (e.g., "care_assessments.encounter_id = encounters.id")
+  join_column     TEXT (e.g., "encounter_id")
 ```
 
 ### Pipeline State Tables
