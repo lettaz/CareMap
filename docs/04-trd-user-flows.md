@@ -10,7 +10,7 @@
 
 ## 1. System Architecture
 
-CareMap is a single Next.js application with API routes serving as the backend layer. It communicates with Supabase (Postgres) for data storage, Vercel AI SDK for LLM orchestration, Vercel Sandbox for agent execution, and ReactFlow for the visual canvas.
+CareMap is structured as a monorepo with two workspaces: `apps/web` (Vite + React SPA frontend) and `apps/api` (future Fastify backend). The frontend currently runs entirely on mock data. The backend will communicate with Supabase (Postgres) for data storage and an LLM provider for AI capabilities.
 
 ### Architecture Diagram
 
@@ -19,69 +19,61 @@ User (Browser)
     │
     ▼
 ┌───────────────────────────────────────────────────────┐
-│               Next.js 14 (App Router)                  │
+│            apps/web — Vite + React 19 SPA              │
 │                                                        │
 │  FRONTEND                                              │
-│  ├── Flow Canvas (ReactFlow)                          │
-│  ├── Agent Panel (Vercel AI SDK useChat)              │
-│  │   ├── Builder Agent (Intent→Plan→Build→Iterate)   │
-│  │   └── Analyst Agent (Mission→Scan→Analyze→Report) │
+│  ├── Flow Canvas (ReactFlow 12)                       │
+│  ├── Agent Panel (Zeit AI-style conversation UI)      │
+│  │   └── CareMap AI (single contextual agent)         │
 │  ├── Dashboard (Recharts + built-in widgets)          │
 │  └── Settings (model configuration)                   │
 │                                                        │
-│  API ROUTES                                            │
-│  ├── /api/ingest      → File parse + AI profiling     │
-│  ├── /api/map         → Mapping suggestion generation │
-│  ├── /api/harmonize   → Data transformation + write   │
-│  ├── /api/chat        → Agent panel conversations      │
-│  └── /api/dashboard   → Pinned widgets + alerts       │
+│  STATE MANAGEMENT (Zustand, project-scoped)           │
+│  ├── pipeline-store  → nodes, edges, selection        │
+│  ├── agent-store     → chat sessions per project      │
+│  ├── dashboard-store → widgets, alerts                │
+│  └── project-store   → project list, metadata         │
 │                                                        │
-│  AGENTS                                                │
-│  ├── Builder Agent    → Profiles, maps, builds model  │
-│  └── Analyst Agent    → Queries, charts, lineage      │
+│  ROUTING (React Router 7)                             │
+│  ├── /                       → Project listing        │
+│  ├── /projects/:id/canvas    → Pipeline builder       │
+│  ├── /projects/:id/dashboard → Analytics dashboard    │
+│  └── /settings               → Configuration         │
+└────────────┬──────────────────────────────────────────┘
+             │ (future: REST / streaming APIs)
+             ▼
+┌───────────────────────────────────────────────────────┐
+│            apps/api — Fastify (to be built)            │
+│                                                        │
+│  API ROUTES                                            │
+│  ├── POST /api/ingest      → File parse + AI profiling│
+│  ├── POST /api/map         → Mapping suggestions      │
+│  ├── POST /api/harmonize   → Data transformation      │
+│  ├── POST /api/chat        → Streaming AI responses   │
+│  └── GET  /api/dashboard   → Widgets + alerts         │
 └────────────┬──────────────────────────────────────────┘
              │
      ┌───────┴────────┐
      ▼                ▼
 ┌──────────┐   ┌─────────────────┐
-│ Supabase │   │  Vercel Sandbox │
-│ (Postgres│   │  (per LLM call) │
-│  + Real- │   │                 │
-│  time)   │   │  Hydrated YAML  │
-│          │   │  semantic layer │
-│ Tables:  │   │  + shell access │
-│ • canon- │   │  for agent      │
-│   ical   │   │  exploration    │
-│ • meta-  │   │                 │
-│   data   │   └─────────────────┘
-│ • pipe-  │            │
-│   line   │            │ SQL execution
-│   state  │◄───────────┘
-└──────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│  LLM (via AI Gateway)    │
-│                          │
-│  Cloud: gpt-4.1 /       │
-│    claude-sonnet         │
-│  Custom: Ollama / local  │
-└─────────────────────────┘
+│ Supabase │   │  LLM Provider    │
+│ (Postgres│   │                  │
+│  + Real- │   │  Cloud: GPT-4.1/ │
+│  time)   │   │  Claude Sonnet   │
+│          │   │  Custom: Ollama  │
+└──────────┘   └─────────────────┘
 ```
 
-### Key Architectural Decision: Two Named Agents, One Semantic Layer
+### Key Architectural Decision: Single Contextual AI Agent
 
-CareMap uses two distinct, user-facing agents that share a common semantic layer. Inspired by Pigment AI's multi-agent architecture (Modeler Agent, Analyst Agent) and Zeit AI's natural-language-first philosophy, both agents are visible in the UI as named collaborators with structured workflows — not hidden backend processes.
+CareMap uses a **single unified AI agent** ("CareMap AI") rather than multiple named agents. The agent adapts its behaviour based on user context: on the canvas it helps profile sources and map fields, on the dashboard it helps analyze and explore data. There is no agent selector or multi-step workflow stepper in the UI.
 
-**Builder Agent** — Active during pipeline construction. Accessible via the agent panel's Builder tile. Follows a structured **Intent → Plan → Build → Iterate** workflow inspired by Pigment's Modeler Agent. The user describes what they want, the agent proposes a plan, the user approves, and the agent executes. This plan-review-execute loop ensures human oversight on every clinically sensitive decision.
+The conversation UI follows a **document-stream pattern** inspired by Zeit AI:
+- User messages with inline entity references (data assets as interactive pills)
+- Agent responses with transparent tool execution steps, rich content, tabbed artifacts (tables, charts), and approval gates
+- Full provenance and reasoning for every AI action
 
-Triggered when files are uploaded, nodes are connected, and mappings are reviewed. Its job is to understand source data and build the semantic model. Tools: `profileSource`, `detectDomain`, `proposeMappings`, `buildSemanticModel`, `runQualityCheck`. Writes to Supabase metadata tables.
-
-**Analyst Agent** — Active during data exploration. Accessible via the agent panel's Analyst tile. Follows a structured **Mission → Scan → Analysis → Report → Outcome** workflow inspired by Pigment's Analyst Agent. The user states their analytical mission, the agent shows which data it will scan, executes the analysis, and delivers a report with follow-up suggestions.
-
-Triggered when users ask questions in the agent panel. Its job is to explore the semantic layer and answer questions about harmonized data. Tools: `readSemanticLayer` (shell exploration in sandbox), `executeSQL`, `generateChart`, `runQualityCheck`, `explainLineage`. Reads from Supabase metadata and canonical tables.
-
-Both agents support natural-language corrections mid-workflow (following Zeit AI's pattern of NL as the universal interface), and both show full provenance for every decision.
+Agent tools (to be wired to the backend): `profileSource`, `proposeMappings`, `runQualityCheck`, `executeSQL`, `generateChart`, `explainLineage`. All tools share a common semantic layer stored in Supabase.
 
 ### Key Architectural Decision: Dynamic Semantic Layer with Sandbox Hydration
 
@@ -99,20 +91,23 @@ This pattern keeps Supabase as the single source of truth (the frontend reads an
 
 | Layer | Technology | Version | Purpose |
 |---|---|---|---|
-| Framework | Next.js (App Router) | 14+ | Full-stack React framework |
+| Frontend Build | Vite | 6.x | Fast dev server and production bundler |
+| UI Framework | React | 19.x | Component-based UI |
 | Language | TypeScript | 5.x | Type safety across frontend and backend |
-| AI SDK | Vercel AI SDK | 6.x | `useChat`, `streamText`, `ToolLoopAgent`, tool definitions |
-| AI Gateway | Vercel AI Gateway | — | Model routing, cost tracking, BYOK |
-| Sandbox | Vercel Sandbox | — | Ephemeral agent execution environment |
-| Canvas | ReactFlow | 12.x | Node-based visual editor |
+| Routing | React Router | 7.x | Client-side routing |
+| State Management | Zustand | — | Lightweight project-scoped stores |
+| Canvas | ReactFlow | 12.x | Node-based visual pipeline editor |
 | Charts | Recharts | 2.x | Chart rendering in chat and dashboard |
-| Database | Supabase (Postgres) | — | Canonical store, metadata, pipeline state, realtime |
+| Styling | Tailwind CSS | 4.x | Utility-first CSS with custom design tokens |
+| Components | shadcn/ui (@base-ui/react) | — | Headless component primitives (uses `render` prop, NOT `asChild`) |
+| Icons | Lucide React | — | Consistent icon system |
+| Fonts | Inter + Geist Mono | — | Body and monospace typography |
+| Backend (future) | Fastify | — | REST API server (apps/api workspace) |
+| Database | Supabase (Postgres) | — | Canonical store, metadata, pipeline state |
 | File parsing | Papa Parse | 5.x | CSV parsing |
 | File parsing | SheetJS | — | Excel parsing |
 | File parsing | pdf-parse | — | PDF text extraction |
-| Styling | Tailwind CSS | 3.x | Utility-first CSS |
-| Components | shadcn/ui | — | Headless component primitives |
-| Deployment | Vercel | — | Hosting, preview deploys, edge functions |
+| Deployment | Vercel | — | Frontend hosting (connected to GitHub repo) |
 
 ---
 
@@ -391,7 +386,9 @@ Response:
 
 ## 5. Agent Tool Specifications
 
-### Builder Agent Tools
+CareMap uses a single unified agent with access to all tools. The agent adapts its tool usage based on the user's context and request.
+
+### Data Engineering Tools
 
 **profileSource** — Takes parsed file data (column names, sample rows) and the canonical model definition. Returns structured profiling for each column: inferred type, semantic label, domain, confidence, quality flags. Uses LLM structured output.
 
@@ -401,15 +398,17 @@ Response:
 
 **buildSemanticModel** — Takes confirmed mappings from one or more sources. Generates or updates the semantic layer in Supabase: creates/updates `semantic_entities`, `semantic_fields`, and `semantic_joins` rows.
 
-**runQualityCheck** — Takes a source file or harmonized table. Returns quality metrics: null rates per column, out-of-range values, duplicate detection, format inconsistencies.
+### Analysis Tools
 
-### Analyst Agent Tools
-
-**readSemanticLayer** — Shell command execution in the sandbox. The agent uses `cat`, `grep`, `ls` to explore hydrated YAML files describing the semantic model. No parameters needed — the agent drives this itself.
+**readSemanticLayer** — Reads and explores the semantic layer metadata to discover available entities, fields, and joins.
 
 **executeSQL** — Takes a SQL query string and an explanation. Executes against Supabase. Returns result rows (limited to 1000) and metadata (row count, execution time).
 
 **generateChart** — Takes query results, chart type, title, axis labels. Returns a Recharts-compatible JSON specification rendered on the client.
+
+### Shared Tools
+
+**runQualityCheck** — Takes a source file or harmonized table. Returns quality metrics: null rates per column, out-of-range values, duplicate detection, format inconsistencies.
 
 **explainLineage** — Takes a table name and field name. Queries `field_mappings` and `source_files` tables. Returns the chain: source file → source column → mapping rule → transformation → canonical field.
 
@@ -467,18 +466,19 @@ example_questions:
 
 ### Hackathon
 
-- Frontend + API routes: Vercel (automatic from Git push)
+- Frontend: Vercel (connected to `lettaz/CareMap` GitHub repo, auto-deploys on push to `main`)
+  - Root Directory: `apps/web`
+  - Framework: Vite
+  - Build: `tsc -b && vite build`
+- Backend: `apps/api` (Fastify, to be deployed separately — Railway or Vercel)
 - Database: Supabase free tier (hosted Postgres)
-- LLM: Vercel AI Gateway (cloud models, BYOK)
-- Sandbox: Vercel Sandbox (ephemeral per agent call)
-- Domain: `caremap.vercel.app` (auto-assigned)
+- LLM: Cloud provider (GPT-4.1 / Claude Sonnet)
 
 ### Production Path (Presentation Only)
 
 - Frontend + API: Docker container in hospital data centre
 - Database: PostgreSQL on hospital server
 - LLM: Ollama running Llama/Mistral locally (same API shape as OpenAI)
-- Sandbox: Local Docker container for agent execution
 - Network: Air-gapped, no external calls
 
 ---
@@ -494,26 +494,24 @@ example_questions:
 ```
 DISCOVER          ONBOARD            CORE TASK                    SUCCESS            RETENTION
 ─────────────────────────────────────────────────────────────────────────────────────────────
-"We need to       Opens CareMap,     Uses Builder Agent:          Data harmonized,   Returns weekly
+"We need to       Opens CareMap,     Uses visual canvas + AI:     Data harmonized,   Returns weekly
 harmonize our     sees empty         1. Adds source nodes         quality dashboard   to add new
 fall risk and     canvas with        2. Uploads files             shows 95%          sources and
-lab data for      helpful prompt.    3. Builder Agent proposes    completeness.      review quality.
-analytics."       Agent panel           profiling plan            Selects Analyst    Anomaly alerts
-                  introduces the     4. Reviews + approves plan   Agent, asks:       prompt her to
-                  Builder Agent      5. Agent streams profiles    "avg fall risk     investigate
-                  and Analyst.       6. Connects to mapper        by ward?"          with Analyst.
-                                     7. Builder proposes          Gets instant
-                                        mapping plan              chart with full
-                                     8. Reviews, corrects 3       provenance.
-                                        uncertain mappings
-                                     9. Approves, harmonizes
-                                    10. Verifies in dashboard
+lab data for      helpful prompt.    3. AI auto-profiles data     completeness.      review quality.
+analytics."       Chat panel shows   4. Reviews rich preview      Opens chat, asks:  Anomaly alerts
+                  CareMap AI with    5. Connects to mapper        "avg fall risk     prompt her to
+                  suggestion         6. Reviews per-field         by ward?"          investigate
+                  buttons.              mapping table             Gets instant       in chat.
+                                     7. Corrects 3 uncertain     chart with full
+                                        mappings                  provenance and
+                                     8. Harmonizes               transparent tool
+                                     9. Verifies in dashboard    steps.
 
 Emotion:          Emotion:           Emotion:                     Emotion:           Emotion:
-Skeptical but     Pleasantly         Impressed — the agent        Satisfied —        Trusts the
-hopeful.          surprised by       showed its plan before       this used to       agents. Uses
-                  the agent          acting. She corrected        take weeks.        them routinely.
-                  onboarding.        it, and it learned.
+Skeptical but     Pleasantly         Impressed — the AI shows     Satisfied —        Trusts the AI.
+hopeful.          surprised by       every step transparently.    this used to       Uses it
+                  the clean UI       She corrected it, and it    take weeks.        routinely.
+                  and suggestions.   worked.
 ```
 
 ### Daniel (Clinical Analyst) — Query Journey
@@ -521,24 +519,22 @@ hopeful.          surprised by       showed its plan before       this used to  
 ```
 TRIGGER           EXPLORE            ANALYSE                      ACT                SHARE
 ─────────────────────────────────────────────────────────────────────────────────────────────
-Receives alert:   Opens dashboard,   Selects Analyst Agent.       Discovers Ward B   Pins the chart
-"Fall risk data   sees anomaly       States mission: "Show        scores spiked      to dashboard.
-completeness      in the feed.       fall risk trends by ward,    after a source     Flags the
-dropped below     Clicks to see      last 90 days, highlight      format change.     mapping issue
-80% for Ward B."  affected records.  wards below 80%."            Asks follow-up:    to Petra for
-                                                                  "Was there a       correction.
-                                     Agent shows scan plan:       data source
-                                     tables + joins. Daniel       change for
-                                     approves. Agent runs         Ward B?"
-                                     analysis, returns chart      Agent traces
-                                     + query plan showing         lineage back
-                                     exactly which tables         to the source.
-                                     were queried.
+Receives alert:   Opens dashboard,   Opens chat panel, asks:      AI traces          Pins the chart
+"Fall risk data   sees anomaly       "Show fall risk trends       lineage: source    to dashboard.
+completeness      in the feed.       by ward, last 90 days,       file → column →    The fix is
+dropped below     Clicks to see      highlight wards below 80%."  mapping rule.      tracked in the
+80% for Ward B."  affected records.                               Discovers: source  conversation
+                                     AI shows tool steps:         format changed.    history.
+                                     profiling → querying →       Asks: "Fix the
+                                     charting. Returns chart      mapping for
+                                     + data table in artifact     Ward B creatinine
+                                     tabs. Daniel sees exactly    values?"
+                                     what was queried.            AI proposes fix
+                                                                  with approval.
 
 Emotion:          Emotion:           Emotion:                     Emotion:           Emotion:
-Concerned.        Relieved —         Impressed — he saw           Root cause         Confident the
-                  easy to find.      the plan before              found fast.        issue is tracked.
-                                     execution. Trusts it.
+Concerned.        Relieved —         Impressed — tool steps       Root cause         Confident the
+                  easy to find.      show full transparency.      found fast.        issue is tracked.
 ```
 
 ---
@@ -597,7 +593,7 @@ Node status dot turns green → label shows "Care Assessments"
 - File is empty: Show error state on node, "File contains no data."
 - PDF extraction fails: Show partial results with "Some content could not be extracted" warning.
 
-### Flow 2: Mapping and Harmonization (with Builder Agent Plan)
+### Flow 2: Mapping Review and Harmonization
 
 ```
 Start (source node is profiled and green)
@@ -609,45 +605,36 @@ User drags "Mapping" node onto canvas
 User draws edge from CSV Source → Mapping node
   │
   ▼
-Agent panel opens → Builder Agent activates automatically
+AI auto-generates mapping suggestions in the background
   │
   ▼
-Builder Agent presents PLAN CARD:
-  "I'll map 12 columns from care_assessments.csv to the canonical model.
-   10 mappings are high confidence (≥85%), 2 need your review."
-  ├── [Approve & Execute]  [Edit Plan]
+User clicks Mapping node → right panel switches to Mapping Detail Panel
   │
   ▼
-User clicks "Approve & Execute"
+Mapping table shows per-field suggestions:
+  ├── Sturzrisiko_Skala → care_assessments.score [92%] ✓
+  ├── Mobilität → care_assessments.score (mobility) [87%] ✓
+  ├── PatientNr → patients.external_id [95%] ✓
+  ├── Datum → care_assessments.assessed_at [90%] ✓
+  └── Station → encounters.ward [78%] ⚠ (needs review)
   │
   ▼
-Stepper advances: Intent ✓ → Plan ✓ → Build (active) → Iterate
+User clicks "Auto-accept high confidence" → 4 mappings accepted
   │
   ▼
-AI generates mapping suggestions (streamed into inspector Mappings tab):
-  ├── Sturzrisiko_Skala → care_assessments.score [92%]
-  ├── Mobilität → care_assessments.score (mobility) [87%]
-  ├── PatientNr → patients.external_id [95%]
-  ├── Datum → care_assessments.assessed_at [90%]
-  └── Station → encounters.ward [78%] ⚠
+User expands "Station → encounters.ward" row (78%)
+  ├── Sees reasoning: "Column likely represents ward/station codes"
+  ├── Sees sample value: "A1"
+  ├── Clicks Accept
   │
   ▼
-User clicks "Accept All High Confidence" → 4 mappings accepted
-  │
-  ▼
-User reviews "Station → encounters.ward" (78%)
-  ├── Looks at sample values: "A1", "B2", "C3"
-  ├── These look like ward codes → clicks Accept
-  │
-  ▼
-Stepper advances to Iterate phase
-Builder Agent summarises: "All 5 mappings confirmed. Ready to harmonize."
+Summary bar updates: 5/5 accepted, 92% average confidence
   │
   ▼
 User drags "Harmonized Store" node → draws edge from Mapping → Store
   │
   ▼
-"Harmonize" button appears in mapping inspector
+"Harmonize" button appears in mapping panel
   │
   ▼
 User clicks "Harmonize"
@@ -659,21 +646,17 @@ Progress bar: "Writing 247 rows to care_assessments..."
 Store node updates: "247 rows written" → green status
   │
   ▼
-Quality alerts generated: "2 rows with null assessment date"
-  │
-  ▼
-Builder Agent: "Harmonization complete. 2 quality alerts generated.
-Would you like me to investigate the null dates?"
+Chat panel shows AI message: "Harmonization complete. 2 quality alerts generated."
   │
   Done
 ```
 
 **Edge cases:**
-- Multiple sources mapped to same target field: Builder Agent flags the conflict in its plan; user must choose which source takes priority or how to merge.
-- Source column has no plausible mapping: Builder Agent marks as "Unmapped" in plan, with option to skip or manually assign via NL correction ("Map 'Bemerkung' to care_assessments.notes").
-- Harmonization fails (type mismatch): Error shown on store node with specific rows that failed. Builder Agent offers to diagnose and propose a corrected mapping plan.
+- Multiple sources mapped to same target field: AI flags the conflict in the mapping table; user must choose which source takes priority.
+- Source column has no plausible mapping: Shown as "Unmapped" status in the mapping table. User can ask the AI in chat: "Map 'Bemerkung' to care_assessments.notes".
+- Harmonization fails (type mismatch): Error shown on store node with specific rows that failed. AI offers to diagnose in the chat panel.
 
-### Flow 3: Multi-Source Mapping (with Unified Agent Plan)
+### Flow 3: Multi-Source Mapping
 
 ```
 Start (two source nodes are profiled: care_assessments.csv and lab_results.xlsx)
@@ -682,34 +665,17 @@ Start (two source nodes are profiled: care_assessments.csv and lab_results.xlsx)
 User drags a Mapping node and connects BOTH sources to it
   │
   ▼
-Agent panel opens → Builder Agent activates
+AI analyses both sources together, generates unified mapping suggestions
   │
   ▼
-Builder Agent presents UNIFIED PLAN CARD:
-  "I've analysed both sources together. Here's my plan:
-   1. Map 12 columns from care_assessments.csv → care_assessments table
-   2. Map 8 columns from lab_results.xlsx → lab_results table
-   3. Both share a 'PatientNr' column — I'll create a shared patient entity
-   4. Proposed joins: patients ↔ encounters ↔ care_assessments
-                      patients ↔ encounters ↔ lab_results
-   18 mappings total (15 high confidence, 3 need review)"
-  ├── [Approve & Execute]  [Edit Plan]
+User clicks Mapping node → Mapping Detail Panel shows unified table:
+  ├── Source: care_assessments.csv (12 columns → care_assessments table)
+  ├── Source: lab_results.xlsx (8 columns → lab_results table)
+  ├── Shared entity detected: PatientNr → patients.external_id
+  ├── 18 mappings total (15 high confidence, 3 need review)
   │
   ▼
-User reviews plan, approves
-  │
-  ▼
-Inspector shows unified semantic model proposal:
-  ├── Entities: patients, encounters, care_assessments, lab_results
-  ├── Joins: patients ↔ encounters ↔ care_assessments
-  │          patients ↔ encounters ↔ lab_results
-  ├── Field mappings per source (two sub-tables)
-  │
-  ▼
-User reviews and confirms mappings (bulk accept + manual review)
-  │
-  ▼
-Semantic model written to Supabase metadata tables
+User reviews and confirms mappings (bulk accept + manual review for uncertain fields)
   │
   ▼
 User connects Mapping → Store → clicks Harmonize
@@ -718,74 +684,57 @@ User connects Mapping → Store → clicks Harmonize
 Both sources harmonized into canonical tables with shared patient IDs
   │
   ▼
-Builder Agent: "494 rows harmonized across 2 tables.
-Your data is now queryable — switch to the Analyst Agent to explore it."
+Chat panel: "494 rows harmonized across 2 tables. Ask me anything about your data."
   │
   Done
 ```
 
-### Flow 4: Analyst Agent Query with Chart Generation
+### Flow 4: Conversational Query with Chart Generation
 
 ```
-Start (data is harmonized, user opens agent panel)
+Start (data is harmonized, user deselects all nodes → chat panel is active)
   │
   ▼
-Agent panel shows two tiles: Builder Agent, Analyst Agent
+Agent panel shows empty state with CareMap AI icon and suggestion buttons
   │
   ▼
-User selects Analyst Agent tile → agent activates
+User clicks suggestion: "Profile {{src-care}} and map it to our canonical schema"
   │
   ▼
-Suggested prompt chips appear: "Average fall risk by ward", "Data completeness overview"
+Suggestion populates the input field → user presses Enter to send
   │
   ▼
-User types: "What is the average fall risk score by ward for the last 30 days?"
+AI responds with document-stream message:
+  │
+  ├── Tool Execution Steps (collapsible card):
+  │   ├── ⊕ Profiling care_assessments.csv  ✓ Success (0.02s)
+  │   ├── ⊕ Mapping to canonical schema     ✓ Success (1.20s)
+  │   └── ⊕ Running quality checks          ✓ Success (0.04s)
+  │
+  ├── Artifact Tabs:
+  │   ├── [Overview] Rich text: "Profiling complete. 12 columns, 247 rows.
+  │   │    Key findings: high-confidence domain match to care_assessments..."
+  │   ├── [247 care_assessments] Interactive data table with scrollable rows
+  │   └── [Chart] Bar chart: score distribution by ward
+  │
+  └── Approval Block: "Accept mapping proposal?" [Accept] [Reject]
   │
   ▼
-MISSION phase: Agent confirms mission scope
-  "I'll analyse fall risk scores grouped by ward for the last 30 days."
+User clicks "Accept" → approval block updates to green "Accepted"
   │
   ▼
-SCAN phase: Agent shows data plan card:
-  "Tables: care_assessments, encounters
-   Join: care_assessments.encounter_id = encounters.id
-   Filter: assessment_type = 'fall_risk', assessed_at ≥ 30 days ago"
+User asks follow-up: "What is the average fall risk score by ward?"
   │
   ▼
-ANALYSIS phase: Agent executes (streamed):
-  ├── Hydrates semantic layer into sandbox
-  ├── Explores: cat semantic/catalog.yml
-  ├── Explores: cat semantic/entities/care_assessments.yml
-  ├── Discovers: score field, ward join via encounters
-  ├── Builds SQL: SELECT e.ward, AVG(ca.score) FROM care_assessments ca
-  │               JOIN encounters e ON ca.encounter_id = e.id
-  │               WHERE ca.assessment_type = 'fall_risk'
-  │               AND ca.assessed_at >= now() - interval '30 days'
-  │               GROUP BY e.ward ORDER BY AVG(ca.score) DESC
-  ├── Executes SQL → gets results
-  ├── Generates bar chart spec
-  │
-  ▼
-REPORT phase: Response renders:
-  ├── Text: "Here's the average fall risk score by ward over the last 30 days.
-  │          Ward B has the highest average score at 2.8."
-  ├── Bar chart: wards on x-axis, avg score on y-axis
-  ├── 📌 Pin to Dashboard button on the chart
-  ├── ▸ Execution Details (collapsed): SQL + tables + "Data freshness: 5 min ago"
-  │
-  ▼
-OUTCOME phase: Agent suggests follow-ups:
-  ├── [chip] "Which patients in Ward B have the highest risk?"
-  ├── [chip] "How has Ward B's score changed over 90 days?"
-  ├── [chip] "Compare fall risk vs staffing levels by ward"
-  │
-  ▼
-User clicks 📌 → toast: "Pinned to dashboard"
+AI responds:
+  ├── Tool steps: Querying semantic layer → Executing SQL → Generating chart
+  ├── Text: "Here's the average fall risk score by ward."
+  ├── Artifact tabs with bar chart (horizontal bars, wards on y-axis)
   │
   Done
 ```
 
-### Flow 5: Anomaly Investigation (Cross-Agent Handoff)
+### Flow 5: Anomaly Investigation
 
 ```
 Start (dashboard shows alert: "3 lab values outside reference range")
@@ -794,48 +743,33 @@ Start (dashboard shows alert: "3 lab values outside reference range")
 User clicks the alert
   │
   ▼
-Drill-through panel opens:
-  ├── Filtered table showing the 3 affected records
+Drill-through view shows the 3 affected records:
   ├── Anomalous cells highlighted in red
   ├── Each row shows: patient ID, test name, value, unit, reference range
   │
   ▼
-User clicks "Investigate with Analyst" on one record
+User navigates to canvas → opens chat panel → asks:
+  "The creatinine values seem wrong. Can you investigate?"
   │
   ▼
-Agent panel opens → Analyst Agent activates with pre-populated mission:
-  "I'm looking at lab result [id]. The creatinine value is 15.2 mg/dL
-   but the reference range is 0.6-1.2. Is this a data mapping issue
-   or a genuine outlier?"
+AI responds:
+  ├── Tool steps:
+  │   ├── ⊕ Tracing lineage for creatinine field   ✓ Success
+  │   ├── ⊕ Checking source data format             ✓ Success
+  │   └── ⊕ Comparing unit conventions              ✓ Success
+  │
+  ├── Content: "This appears to be a unit conversion issue. The source data
+  │   is in µmol/L (range ~53-106) but was mapped without conversion to
+  │   mg/dL. The mapping needs a conversion factor of 0.0113."
+  │
+  └── Approval: "Update creatinine mapping with unit conversion?"
+      [Accept] [Reject]
   │
   ▼
-Analyst Agent investigates (Mission → Scan → Analysis → Report):
-  ├── SCAN: "I'll check the lineage for this record: source file, column,
-  │          mapping transformation, and the original value."
-  ├── ANALYSIS: Traces lineage via explainLineage tool
-  ├── Discovers: source file uses µmol/L, mapping didn't include unit conversion
-  ├── REPORT: "This appears to be a unit conversion issue. The source data
-  │            is in µmol/L (range ~53-106) but was mapped without conversion
-  │            to mg/dL. The mapping needs a conversion factor of 0.0113."
-  ├── OUTCOME suggests: [chip] "Fix this mapping with Builder Agent"
+User clicks Accept → AI updates mapping → re-harmonizes
   │
   ▼
-User clicks "Fix this mapping with Builder Agent" → agent panel switches
-  │
-  ▼
-Builder Agent activates with context pre-loaded:
-  "The creatinine mapping from lab_results.xlsx needs a unit conversion.
-   Here's my plan:
-   1. Update the mapping transformation: value * 0.0113
-   2. Re-harmonize affected rows
-   3. Re-run quality check to verify"
-  ├── [Approve & Execute]  [Edit Plan]
-  │
-  ▼
-User approves → Builder Agent fixes mapping → re-harmonizes
-  │
-  ▼
-Builder Agent: "Done. 3 previously anomalous values are now within range.
+AI: "Done. 3 previously anomalous values are now within range.
 Quality alert resolved."
   │
   Done
@@ -869,19 +803,19 @@ Quality alert resolved."
 
 **US-2.5** As a data steward, I want to see sample values alongside each inference so that I can quickly verify whether the AI's interpretation is correct.
 
-### Epic 3: Intelligent Mapping (with Builder Agent Plans)
+### Epic 3: Intelligent Mapping
 
-**US-3.1** As a data steward, I want the Builder Agent to propose a structured mapping plan when I connect sources to a mapping node, so that I can review the strategy before individual mappings are generated.
+**US-3.1** As a data steward, I want the AI to auto-generate mapping suggestions when I connect sources to a mapping node, so I can review them in the Mapping Detail Panel.
 
-**US-3.2** As a data steward, I want each mapping suggestion to include a plain-language explanation so that I understand why the AI made that suggestion.
+**US-3.2** As a data steward, I want each mapping suggestion to include a plain-language explanation and sample values so that I understand why the AI made that suggestion.
 
-**US-3.3** As a data steward, I want to accept, reject, or edit individual mappings so that I retain full control over how my data is harmonized.
+**US-3.3** As a data steward, I want to accept, reject, or reset individual mappings via expandable rows in the mapping table so that I retain full control.
 
-**US-3.4** As a data steward, I want to bulk-accept high-confidence mappings so that I can move quickly when the AI is right.
+**US-3.4** As a data steward, I want to auto-accept high-confidence mappings with one click so that I can move quickly when the AI is right.
 
-**US-3.5** As a data steward, I want the Builder Agent to detect overlapping entities when multiple sources connect to one mapper and present a unified plan, so that I get a unified model rather than duplicates.
+**US-3.5** As a data steward, I want the AI to detect overlapping entities when multiple sources connect to one mapper and present a unified mapping, so that I get a unified model rather than duplicates.
 
-**US-3.6** As a data steward, I want to correct the Builder Agent's mapping decisions using natural language (e.g., "Map 'Station' to encounters.ward, not patient ID") so that I don't have to hunt through dropdowns.
+**US-3.6** As a data steward, I want to ask the AI to fix mappings using natural language in the chat (e.g., "Map 'Station' to encounters.ward, not patient ID") so that I don't have to hunt through dropdowns.
 
 ### Epic 4: Data Harmonization
 
@@ -891,21 +825,21 @@ Quality alert resolved."
 
 **US-4.3** As a data steward, I want the system to detect and flag quality issues during harmonization so that I don't silently introduce bad data.
 
-### Epic 5: Agent-Driven Analytics (Analyst Agent)
+### Epic 5: Conversational Analytics
 
-**US-5.1** As a clinical analyst, I want to select the Analyst Agent and state my mission in natural language so that I can query harmonized data without writing SQL.
+**US-5.1** As a clinical analyst, I want to ask questions in natural language in the chat panel so that I can query harmonized data without writing SQL.
 
-**US-5.2** As a clinical analyst, I want the Analyst Agent to show me which tables and joins it plans to use (Scan phase) before executing, so that I can verify the scope of the analysis.
+**US-5.2** As a clinical analyst, I want the AI to show transparent tool execution steps (what it queried, how long it took) so that I can verify the scope of the analysis.
 
-**US-5.3** As a clinical analyst, I want to see charts alongside text explanations so that I can quickly understand patterns and trends.
+**US-5.3** As a clinical analyst, I want to see charts, tables, and text explanations in tabbed artifact views so that I can quickly understand patterns and trends.
 
-**US-5.4** As a clinical analyst, I want every query result to show execution details (SQL, tables, joins, data freshness) so that I can trust the answer.
+**US-5.4** As a clinical analyst, I want every query result to show execution details (SQL, tables, joins) in expandable tool steps so that I can trust the answer.
 
 **US-5.5** As a clinical analyst, I want to pin useful charts to the dashboard so that I can monitor them without re-asking.
 
-**US-5.6** As a clinical analyst, I want the Analyst Agent to suggest follow-up questions after each result (Outcome phase) so that I can explore related insights.
+**US-5.6** As a clinical analyst, I want clickable suggestion buttons so that I can explore related insights without typing.
 
-**US-5.7** As a clinical analyst, I want the Analyst Agent to hand off to the Builder Agent when a data mapping fix is needed, preserving context, so that I can resolve root causes without starting over.
+**US-5.7** As a clinical analyst, I want the AI to handle both analysis and mapping fixes in a single conversation, preserving context, so that I can resolve root causes without switching tools.
 
 ### Epic 6: Quality Monitoring
 
@@ -917,19 +851,19 @@ Quality alert resolved."
 
 **US-6.4** As a data steward, I want quality alerts to tell me which source and mapping produced the issue so that I can fix the root cause.
 
-### Epic 7: Agent Experience
+### Epic 7: AI Experience
 
-**US-7.1** As any user, I want to see two named agents (Builder and Analyst) as selectable tiles in the agent panel so that I know which AI capability to use.
+**US-7.1** As any user, I want a single unified AI assistant that adapts to my context (canvas vs dashboard) so that I don't have to manually select an agent.
 
-**US-7.2** As any user, I want the active agent to show a structured workflow stepper (Intent→Plan→Build→Iterate or Mission→Scan→Analysis→Report→Outcome) so that I always know where I am in the process.
+**US-7.2** As any user, I want to see transparent tool execution steps in the conversation so that I always know what the AI did and how.
 
-**US-7.3** As a data steward, I want the Builder Agent to present a plan before executing so that I can review and approve before any data is changed.
+**US-7.3** As a data steward, I want approval gates for consequential actions (accepting mappings, harmonizing data) so that I can review before data is changed.
 
-**US-7.4** As a clinical analyst, I want the Analyst Agent to show which data sources it will query (Scan phase) before executing so that I can verify scope.
+**US-7.4** As any user, I want inline entity pills referencing my data assets (tables, columns, sources) so that the conversation is linked to my actual data.
 
-**US-7.5** As any user, I want agents to hand off to each other with preserved context (e.g., Analyst detects a mapping issue → hands off to Builder to fix it) so that I don't lose my train of thought.
+**US-7.5** As any user, I want a context menu on canvas nodes with "Send to Chat" so that I can quickly discuss a specific node with the AI.
 
-**US-7.6** As a first-time user, I want a brief onboarding card explaining the two agents so that I understand the agent panel immediately.
+**US-7.6** As a first-time user, I want a welcoming empty state with suggestion buttons so that I understand the AI's capabilities immediately.
 
 ### Epic 8: On-Premise Readiness
 
@@ -943,23 +877,23 @@ Quality alert resolved."
 
 ## 11. Demo Script (5 Minutes)
 
-This is the exact flow to walk through on stage at START Hack. The demo now showcases the agent-first UX inspired by Pigment AI and Zeit AI.
+This is the exact flow to walk through on stage at START Hack. The demo showcases the conversational AI UX inspired by Zeit AI.
 
 | Time | Action | What the Audience Sees |
 |---|---|---|
-| 0:00 | Open CareMap, empty canvas | Clean light-themed canvas with "Add a data source" prompt. Agent panel visible on right with Builder and Analyst tiles. |
-| 0:15 | Drag CSV Source, drop care_assessments.csv | Node appears on white canvas. Builder Agent activates — proposes profiling plan. User approves. AI profiling streams in. |
-| 0:45 | Show one correction in the profile panel | Demonstrate human-in-the-loop: correct a misidentified column. Mention: "The agent showed its plan first — I approved before it ran." |
-| 1:00 | Drag Excel Source, drop lab_results.xlsx | Second node profiles automatically. Builder Agent updates its plan. |
-| 1:15 | Drag Mapping node, connect both sources to it | Builder Agent presents a unified mapping plan: "18 mappings across 2 sources, 15 high confidence, 3 need review." User approves. |
-| 1:45 | Bulk accept high confidence, manually review one uncertain mapping | Show the confidence-based workflow + NL correction: type "Map 'Station' to encounters.ward" in the agent panel. |
-| 2:15 | Connect Mapping → Store, click Harmonize | Progress bar, "494 rows harmonized". Builder Agent summarises: "Done. Switch to Analyst Agent to query your data." |
-| 2:30 | Select Analyst Agent, type "Average fall risk score by ward?" | Analyst workflow: Mission confirmed → Scan shows tables → Analysis runs → Bar chart renders with full provenance. |
+| 0:00 | Open CareMap, empty canvas | Clean light-themed canvas with "Add a data source" prompt. Chat panel visible on right with CareMap AI. |
+| 0:15 | Drag CSV Source, drop care_assessments.csv | Node appears. Right panel switches to source detail: upload → analyzing shimmer → rich data preview with column stats. |
+| 0:45 | Click a column header in the data preview | Show AI-inferred type, semantic label, confidence, sample values. Correct a misidentified column inline. |
+| 1:00 | Drag Excel Source, drop lab_results.xlsx | Second node profiles automatically. Show auto-profiling. |
+| 1:15 | Drag Mapping node, connect both sources to it | Click Mapping node → Mapping Detail Panel: 18 per-field mapping suggestions with confidence bars. |
+| 1:45 | Click "Auto-accept high confidence", review one uncertain mapping | Expand a row to see reasoning. Accept it. Show the confidence-based workflow. |
+| 2:15 | Connect Mapping → Store, click Harmonize | Progress bar, "494 rows harmonized". Store node turns green. |
+| 2:30 | Deselect node → chat panel opens. Type "Average fall risk by ward?" | AI shows tool steps (querying, executing, charting) → artifact tabs with bar chart and data table → full transparency. |
 | 3:15 | Pin the chart to dashboard | Toast confirmation, switch to dashboard tab. |
-| 3:30 | Show dashboard: pinned chart + built-in quality widgets | Point out completeness heatmap, anomaly feed. |
-| 3:45 | Click an anomaly alert → "Investigate with Analyst" | Analyst traces lineage, discovers unit conversion issue. Suggests: "Fix with Builder Agent." |
-| 4:00 | Show cross-agent handoff: Analyst → Builder | Builder Agent proposes a fix plan. Approve → mapping corrected → re-harmonized. "Two agents, one workflow." |
-| 4:15 | Open Settings, show model switcher | Dropdown with cloud models + "Custom" with localhost URL. Quick mention of on-prem path. |
-| 4:30 | Switch to slides: architecture diagram | Two agents, one semantic layer. On-prem deployment path. |
+| 3:30 | Show dashboard: pinned chart + built-in quality widgets | Point out KPI cards, completeness heatmap, anomaly feed. |
+| 3:45 | Right-click a node → "Send to Chat" | Show the canvas-to-chat bridge: node appears as entity pill in chat. AI responds contextually. |
+| 4:00 | Ask about an anomaly in chat | AI traces lineage with transparent tool steps, discovers unit issue. Shows approval block: "Fix mapping?" |
+| 4:15 | Open Settings, show model switcher | Dropdown with cloud models + "Custom" with localhost URL. On-prem path. |
+| 4:30 | Switch to slides: architecture diagram | Single AI agent, semantic layer, on-prem deployment. |
 | 4:45 | Business case slide | 1,400 institutions × harmonized data = digital twin of care. |
-| 5:00 | Close | "CareMap: from fragmented data to a unified clinical picture — with AI agents you can trust." |
+| 5:00 | Close | "CareMap: from fragmented data to a unified clinical picture — with an AI you can trust." |

@@ -18,7 +18,7 @@ CareMap is a data engineering tool used in clinical contexts. The design must ba
 
 **Role-appropriate density.** Petra (data steward) sees detailed node configurations and mapping tables. Daniel (clinical analyst) sees dashboards and chat results. Same data, different levels of detail, controlled by which surface they're using.
 
-**Agents as collaborative partners.** Inspired by Pigment's agentic UX and Zeit AI's natural-language-first approach, CareMap treats AI agents as visible, named collaborators — not hidden backend processes. Users choose which agent to engage, see its plan before execution, and always retain approval authority. This follows the industry shift toward "intent-based" interaction: describe what you want, review the plan, then execute.
+**AI as a contextual partner.** Inspired by Zeit AI's document-style conversation UI, CareMap embeds a single unified AI agent that adapts to the user's context. On the canvas, it helps profile and map data. On the dashboard, it helps analyze and explore. The user never "selects" an agent — the AI understands context from what's selected and where the user is working. Every AI action is transparent (tool execution steps, reasoning, provenance).
 
 **Calm, light, and professional.** Enterprise healthcare users work in well-lit clinical and office environments. A light theme with restrained colour, high-contrast typography, and generous whitespace communicates professionalism and trustworthiness. Information density is achieved through typographic hierarchy and structured layouts — not through darkening the interface. This aligns with the modern enterprise SaaS standard (Linear, Notion, Figma, Pigment) of clean light foundations with deliberate, semantic colour accents.
 
@@ -50,7 +50,7 @@ CareMap is a data engineering tool used in clinical contexts. The design must ba
 
 **Content area:** `bg-app` background. Fills the remaining space. Each view (Canvas, Dashboard, Settings) owns its own internal layout.
 
-**Agent panel:** Persistent right sidebar, collapsible. Width: 420px expanded, 48px collapsed (showing only the agent icon). Toggles with a keyboard shortcut or click. Slides over the content area, does not push it. This panel replaces the previous "chat panel" with a richer agent-first experience (see Section 4).
+**Right panel:** Persistent right sidebar, collapsible and resizable (drag left edge). Default 420px for chat, wider for data panels. Toggles via top bar button. Content is context-aware: shows the AI chat when no node is selected, switches to node-specific detail panels (source, mapping, etc.) when a node is selected. See Sections 3 (Inspector) and 4 (Agent Panel) for details.
 
 ### Responsive Approach
 
@@ -113,169 +113,142 @@ Each node is a rounded-rectangle card, minimum 180px wide × 80px tall. White `b
 - Active/data-flowing: Animated dash pattern along the edge, `accent` colour.
 - Error: Solid `error` colour with a subtle pulse.
 
-### Inspector Panel
+### Context-Aware Right Panel
 
-Opens when a node is selected. 360px wide, `bg-surface` background with `border-primary` left border. Fixed to the right side of the canvas area (not the agent panel — inspector and agent coexist if screen width allows, otherwise inspector pushes agent closed).
+The right panel **replaces the chat panel** when a node is selected, and reverts to chat when deselected. It is a single resizable panel, not a second panel alongside chat.
 
-**Tabs (per node type):**
+**Default widths by content:**
+- Agent chat: 420px
+- Source detail panel: 580px
+- Mapping detail panel: 560px
+- Other node types: 420px
 
-For source nodes:
-- **Upload** — Drop zone for file upload (when no file loaded) or file info card (when loaded).
-- **Profile** — AI-inferred schema table: column name, type, semantic label, confidence bar, sample values. Each row is editable via dropdowns.
-- **Quality** — Summary of detected issues: null rates, outliers, format problems.
+**Resizing:** Drag the left edge of the panel. Min 320px, max 900px. The drag handle shows a subtle hover highlight.
 
-For mapping nodes:
-- **Mappings** — Table of mapping suggestions with accept/reject/edit actions. Includes an "Agent Plan" banner at top showing the Builder Agent's proposed mapping strategy before individual suggestions. When multiple sources are connected, this shows the unified semantic model proposal.
-- **Confirmed** — List of accepted mappings with transformation details.
+**For source nodes — Source Detail Panel:**
 
-For quality check nodes:
-- **Results** — Quality metrics: completeness percentages, range check results, detected anomalies.
+A stateful panel with three phases:
+1. **Upload** — Drop zone for file upload. Dashed border, cloud icon. Accepts CSV/Excel.
+2. **Analyzing** — Shimmer animation and AI analysis progress (profiling, semantic mapping, quality assessment).
+3. **Preview** — Rich data table with column-level insights:
+   - AI-generated summary bar (total records, mapped fields, data quality score)
+   - Scrollable data table with sticky header row
+   - Column headers clickable for popover showing type, semantic label, confidence, sample values
+   - Contextual AI prompt chips at the bottom
 
-For harmonized store nodes:
-- **Status** — Write status, record counts, last harmonization timestamp.
-- **Schema** — View of the canonical tables this pipeline writes to.
+**For mapping nodes — Mapping Detail Panel:**
+
+A comprehensive per-field mapping review interface:
+- Header: Editable label, node summary (total mappings, accepted, pending), "Back to Chat" button
+- Summary bar: Overall confidence bar, breakdown badges (auto-mapped, needs review, unmapped)
+- Actions bar: "Show issues only" filter toggle, "Auto-accept high confidence" button
+- Mapping table: One row per field showing:
+  - Source column name
+  - Sample value from source data
+  - Target table.column (with arrow indicator)
+  - Confidence percentage (colour-coded)
+  - Status badge (accepted/pending/rejected/unmapped)
+  - Expandable reasoning section with AI explanation and transformation rule
+  - Accept/Reject/Reset action buttons per row
+- AI prompt chips at the bottom (contextual to issue count)
+
+**For quality check nodes:**
+- Quality metrics: completeness percentages, range check results, detected anomalies.
+
+**For harmonized store nodes — Store Status Tab:**
+- Write status, record counts, last harmonization timestamp.
+- Schema view of canonical tables this pipeline writes to.
 
 ---
 
-## 4. The Agent Panel
+## 4. The Agent Panel (Zeit AI-Inspired)
 
 ### Design Rationale
 
-Inspired by Pigment AI's multi-agent sidebar and Zeit AI's natural-language-first philosophy, CareMap replaces the simple chat panel with a purpose-built agent panel. Instead of a generic chat interface, users explicitly choose an agent, see its structured workflow, and retain approval authority at every step.
+CareMap uses a **single unified AI agent** ("CareMap AI") rather than multiple named agents. Inspired by Zeit AI's conversation UI, the chat panel uses a **full-width document stream** instead of traditional chat bubbles. The AI is contextual — it adapts to what the user is doing (pipeline building vs data analysis) without requiring explicit agent selection.
 
 ### Layout
 
-Right sidebar, 420px wide when expanded. Collapsible to a 48px strip showing only the agent icon. `bg-surface` background with a `border-primary` left border.
+Right sidebar, resizable by dragging the left edge. Default widths vary by content (420px for chat, 560–580px for data-heavy panels). Min 320px, max 900px. `bg-app` background. Collapsible via the top bar toggle.
 
 **Anatomy:**
 
 ```
 ┌──────────────────────────────┐
-│  CareMap Agents         [—]  │  ← header with collapse button
-├──────────────────────────────┤
 │                              │
-│  ┌────────┐  ┌────────┐     │  ← agent selector tiles
-│  │ 🔧     │  │ 📊     │     │
-│  │Builder │  │Analyst │     │
-│  │ Agent  │  │ Agent  │     │
-│  └────────┘  └────────┘     │
-│                              │
-├──────────────────────────────┤
-│                              │
-│  Agent workflow area         │  ← scrollable, changes per agent
-│  (thread + structured        │
-│   workflow steps)            │
+│  [User message with          │  ← full-width, no bubbles
+│   inline entity pills]       │
 │                              │
 │  ┌────────────────────────┐  │
-│  │ [chart / plan / result │  │  ← inline outputs
-│  │  rendered inline]  📌  │  │
+│  │ ⊕ Profiling  src.csv ✓ │  │  ← collapsible tool steps
+│  │ ⊕ Mapping → target  ✓ │  │     with status badges
+│  │ ⊕ Quality checks    ✓ │  │
 │  └────────────────────────┘  │
 │                              │
-│  ▸ Execution Details         │  ← collapsible provenance
-│    SQL / lineage / steps     │
+│  ┌────────────────────────┐  │
+│  │ Overview │ 247 table │  │  │  ← tabbed artifact viewer
+│  │──────────────────────── │  │
+│  │ Rich content / chart /  │  │
+│  │ data table             │  │
+│  └────────────────────────┘  │
+│                              │
+│  ┌─ Accepted ─────────────┐  │  ← approval block
+│  │ ✓ Mapping proposal     │  │
+│  │   has been accepted     │  │
+│  └────────────────────────┘  │
 │                              │
 ├──────────────────────────────┤
-│  [Describe what you need..]→ │  ← input area
-│  Suggested: [chip][chip]     │  ← context-aware prompt chips
+│  ┌────────────────────────┐  │
+│  │ Ask anything about     │  │  ← input at bottom
+│  │ your data...           │  │     (auto-expanding textarea)
+│  │ [📎] [🖼]          [↑] │  │
+│  └────────────────────────┘  │
+│  ⊕ Agent ▾  ⚡ CareMap Pro ▾ │  ← mode/model selectors
 └──────────────────────────────┘
 ```
 
-### Agent Selector
+### Conversation UI Components
 
-Two tiles at the top of the panel, always visible when no conversation is active. Each tile is a card with `bg-app` background, `border-primary` border, and a hover state of `bg-hover`.
+**Entity Pills:** Inline references to data assets rendered as rounded chips with type-specific icons (table, column, source, chart). Include optional hash IDs. Example: `[📊 247 care_assessments]`. Used in both user prompts and AI responses via `{{entityId}}` markers.
 
-**Builder Agent Tile:**
-- Icon: wrench/hammer icon in `#059669` (emerald)
-- Label: "Builder Agent"
-- Subtitle: "Profile sources, map fields, build your data model"
-- Active state: emerald left border accent, `bg-hover` background
+**Tool Execution Steps:** Collapsible rows in a bordered card showing what the AI did. Each step has:
+- Step icon (search, edit, chart, table, check)
+- Label with inline entity pills
+- Status badge: green "Success (0.02s)" or spinning loader
+- Expandable detail section (SQL, profiling output, etc.)
 
-**Analyst Agent Tile:**
-- Icon: chart/magnifying glass icon in `#3B82F6` (blue)
-- Label: "Analyst Agent"
-- Subtitle: "Query data, generate charts, investigate anomalies"
-- Active state: blue left border accent, `bg-hover` background
+**Artifact Tabs:** A horizontal tab bar below AI responses with:
+- **Overview** tab — rich formatted text (bold, bullet points)
+- **Table** tabs — scrollable data tables with sticky headers, hash IDs (e.g., `247 care_assessments`)
+- **Chart** tabs — interactive Recharts visualizations (horizontal bar, line), hash IDs
+- **+** button for requesting new artifacts
 
-Once an agent is selected, the tiles collapse into a compact header showing the active agent's icon and name, with a "Switch agent" dropdown.
-
-### Builder Agent Workflow (Pigment Modeler Pattern)
-
-The Builder Agent follows a structured **Intent → Plan → Build → Iterate** workflow, visible in the panel.
-
-**Step indicators:** A horizontal stepper bar appears below the agent header showing the four phases. The current phase is highlighted in `accent` colour, completed phases show a checkmark, and future phases are in `text-tertiary`.
-
-```
-  ● Intent  ─── ○ Plan  ─── ○ Build  ─── ○ Iterate
-  (active)
-```
-
-**Intent phase:** User describes what they need in natural language. Example: "I just uploaded a care assessment file with German column names. Help me profile it and map it to the canonical model." The agent confirms understanding and moves to Plan.
-
-**Plan phase:** The agent presents a structured plan card:
-
-```
-┌──────────────────────────────────┐
-│  📋 Proposed Plan                │
-│                                  │
-│  1. Profile 12 columns from      │
-│     care_assessments.csv         │
-│  2. Classify domain as care      │
-│     assessments (high confidence)│
-│  3. Map 10 fields to canonical   │
-│     model (2 need review)        │
-│  4. Run quality check on         │
-│     mapped data                  │
-│                                  │
-│  [Approve & Execute]  [Edit Plan]│
-└──────────────────────────────────┘
-```
-
-The user reviews and approves or edits before the agent proceeds.
-
-**Build phase:** The agent executes the approved plan. Progress is shown step by step with status indicators. Results stream into the inspector panel (profiling results, mapping suggestions). The chat thread shows a running summary.
-
-**Iterate phase:** After execution, the agent summarises results and asks if corrections are needed. The user can request changes in natural language: "The 'Station' column should map to encounters.ward, not patients.external_id." The agent proposes an updated plan and re-executes.
-
-### Analyst Agent Workflow (Pigment Analyst Pattern)
-
-The Analyst Agent follows a structured **Mission → Scan → Analysis → Report → Outcome** workflow.
-
-**Step indicators:** Same horizontal stepper pattern.
-
-```
-  ● Mission  ─── ○ Scan  ─── ○ Analysis  ─── ○ Report  ─── ○ Outcome
-  (active)
-```
-
-**Mission phase:** User describes their analytical goal. Example: "What is the average fall risk score by ward for the last 30 days?" The agent confirms the mission scope.
-
-**Scan phase:** The agent shows which data sources and entities it will query. Displayed as a compact card listing tables, fields, and join paths. The user can verify scope before the agent proceeds.
-
-**Analysis phase:** The agent builds and executes SQL. A "thinking" indicator shows progress. The execution details (SQL query, tables used) stream into a collapsible section.
-
-**Report phase:** Results render as text narrative + inline visualisation (charts, tables). Each chart has a "Pin to Dashboard" button. The query plan is shown in a collapsible block below.
-
-**Outcome phase:** The agent summarises key findings and suggests follow-up questions as chips. Pinned charts persist to the dashboard. The mission can be saved for repeat execution (future scope).
-
-### Response Types
-
-**Text:** Narrative explanation paragraph. Left-aligned with agent avatar (coloured icon matching the active agent).
-
-**Chart:** Rendered inline using Recharts. Chart types: bar, line, pie, heatmap, table. Each chart has a "Pin to Dashboard" button in its top-right corner. Charts use the semantic colour palette for data series.
-
-**Plan Card:** Structured proposal with numbered steps, a summary, and Approve/Edit action buttons. `bg-app` background with `border-primary` border and a left accent stripe matching the agent colour.
-
-**Execution Details:** Collapsible block below outputs. Shows: the SQL query, tables used, join conditions, data freshness note ("Data from: care_assessments, last sync 8 min ago"), and lineage references.
-
-**Lineage Note:** Small metadata line linking the answer to its source data.
+**Approval Blocks:** Inline status indicators:
+- Accepted (green): "Mapping proposal has been accepted"
+- Pending: Shows Accept/Reject buttons
+- Rejected (red): Shows rejection message
 
 ### Input Area
 
-Text input with `bg-app` background, `border-primary` border, and `text-primary` text. Placeholder text changes based on active agent:
-- Builder: "Describe what you want to profile, map, or build..."
-- Analyst: "Ask a question about your data..."
+At the **bottom** of the panel. Auto-expanding textarea in a rounded card with:
+- Placeholder: "Ask anything about your data..."
+- Attach file and attach image buttons (left)
+- Send button (right, blue when active)
+- Below the input: Mode selector (Agent/Ask) and Model selector (CareMap Pro/CareMap Fast) as dropdown buttons
 
-When the input is empty, suggested prompt chips appear above it. These are context-aware: if the user just harmonized care assessment data, suggestions might include "Show average fall risk by ward" or "Which fields have the most missing data?"
+When no messages exist, an **empty state** fills the center:
+- CareMap AI icon and description
+- "Try asking" section with clickable suggestion buttons
+- Clicking a suggestion populates the input (does not auto-send)
+
+### Canvas Context Menu Integration
+
+Right-clicking any node on the canvas shows a context menu with:
+- **Send to Chat** — Creates a user message with the node as an EntityPill, opens the chat panel
+- **Recompute Node** — Re-runs the node's processing
+- **Remove from Graph** — Deletes the node and its connected edges
+
+This bridges the visual pipeline builder with the conversational AI.
 
 ---
 
@@ -403,12 +376,11 @@ CareMap uses a light theme as primary. Light interfaces are the standard for mod
 | Quality | `#D97706` (amber-600) | `#FFFBEB` (amber-50) |
 | Sink | `#6366F1` (indigo-500) | `#EEF2FF` (indigo-50) |
 
-**Agent Colours:**
+**Agent Colour:**
 
 | Agent | Colour | Subtle BG |
 |---|---|---|
-| Builder Agent | `#059669` (emerald-600) | `#ECFDF5` (emerald-50) |
-| Analyst Agent | `#3B82F6` (blue-500) | `#EFF6FF` (blue-50) |
+| CareMap AI | `#4F46E5` (indigo-600) | `#EEF2FF` (indigo-50) |
 
 ### Typography
 
@@ -491,17 +463,17 @@ The dashboard supports drill-through at every level:
 
 This three-level drill pattern matches how clinical quality managers actually work: overview → investigate → root cause.
 
-### Agent Plan-Review-Execute Pattern (from Pigment)
+### Transparent AI Execution Pattern (from Zeit AI)
 
-Borrowed from Pigment's Modeler Agent and adapted for clinical data:
+Borrowed from Zeit AI's document-style conversation UI:
 
-1. **Intent:** User describes what they want in natural language.
-2. **Plan:** Agent proposes a structured, numbered plan with estimated impact.
-3. **Review:** User reviews the plan, can edit or request changes.
-4. **Execute:** Agent proceeds only after explicit user approval.
-5. **Iterate:** User can request corrections, triggering a new plan cycle.
+1. **User intent:** User describes what they want in natural language, optionally referencing data assets via entity pills.
+2. **Tool execution:** The AI shows collapsible execution steps (profiling, mapping, quality checks) in real time with status badges and durations.
+3. **Rich output:** Results appear as tabbed artifacts (overview text, data tables, interactive charts) inline in the conversation.
+4. **Approval gate:** For consequential actions (accepting mappings, harmonizing data), an approval block asks for explicit user confirmation.
+5. **Iteration:** User can follow up conversationally. The AI maintains context.
 
-This pattern applies to both the Builder Agent (pipeline construction) and the Analyst Agent (data queries). It ensures the human always has the final word on clinically sensitive decisions.
+This ensures the human always sees what the AI did, how long it took, and retains approval authority on clinically sensitive decisions.
 
 ### Natural Language as Universal Interface (from Zeit AI)
 
@@ -547,27 +519,31 @@ Natural language supplements — but does not replace — the visual canvas and 
 - User drops on another node's input port → edge snaps into place with `border-strong` colour.
 - If it's a source→mapper connection, the Builder Agent activates in the agent panel with a proposed mapping plan.
 
-### Mapping Review with Agent Plan
+### Mapping Review (via Mapping Detail Panel)
 
-- Source→Mapper edge is created → agent panel opens with Builder Agent active.
-- Builder Agent presents a plan card: "I'll map X columns from Y source to the canonical model. 8 mappings are high confidence, 2 need your review."
-- User clicks "Approve" → mapping suggestions stream into the inspector's Mappings tab.
-- Each row: source field, arrow, target field, confidence bar (on `bg-elevated` track), action buttons.
-- User clicks "Accept" → row background transitions to `success-subtle`, moves to Confirmed tab.
-- User clicks "Edit" → target field becomes a searchable dropdown with `bg-surface` background.
-- User clicks "Reject" → row background transitions to `error-subtle`, marked as rejected.
-- "Accept All High Confidence" button at top for bulk action (accent button style).
-- "Harmonize" button at bottom (accent button style) triggers data write when at least one mapping is confirmed.
+- Source→Mapper edge is created → user clicks mapping node → right panel switches to Mapping Detail Panel.
+- AI generates mapping suggestions shown as a table with per-field rows.
+- Each row: source column, sample value, arrow, target table.column, confidence %, status badge.
+- User clicks a row to expand → shows AI reasoning, transformation rule, Accept/Reject/Reset buttons.
+- "Auto-accept high confidence" button at top for bulk acceptance.
+- "Show issues only" filter to focus on uncertain/unmapped fields.
+- AI prompt chips at bottom: "Fix unmapped fields", "Optimize transformations", etc.
 
-### Agent Query Flow (Analyst)
+### Conversational Query Flow
 
-- User selects the Analyst Agent tile (or agent is already active).
-- User types a question or selects a suggested prompt chip.
-- Stepper advances through Mission → Scan → Analysis → Report → Outcome.
-- Scan card shows which tables and joins will be used — user can verify.
-- During Analysis, a "thinking" indicator with elapsed time appears.
-- Report renders: text explanation + chart + collapsible execution details.
-- Outcome shows follow-up question chips and pin button on charts.
+- User types a question in the chat input or clicks a suggestion chip.
+- Chat input is at the **bottom** of the agent panel. Clicking suggestions populates the input (does NOT auto-send).
+- AI responds with a document-style message: tool execution steps (collapsible), rich content, artifact tabs.
+- Tool steps show real-time status: "Profiling care_assessments.csv... Success (0.02s)".
+- Artifact tabs display Overview (formatted text), Table (interactive data), Chart (Recharts visualization).
+- Approval blocks appear for consequential actions (user confirms or rejects inline).
+
+### Canvas → Chat Bridge
+
+- Right-click any node on the canvas → context menu appears at cursor position.
+- "Send to Chat" creates a user message with the node as an entity pill and opens the chat panel.
+- "Remove from Graph" deletes the node and all connected edges.
+- Clicking anywhere else on the canvas closes the context menu.
 
 ### Pin to Dashboard
 
@@ -595,18 +571,14 @@ Upload tab shows:
 - Text: "Drop a CSV file here or click to browse" in `text-secondary`
 - Accepted formats listed below in `text-tertiary`
 
-### Agent Panel — No Data Harmonized
+### Agent Panel — Empty State
 
-Agent selector tiles show both agents. Analyst Agent tile has a subtle `text-tertiary` label: "Harmonize data to start asking questions."
-
-Builder Agent tile shows: "Upload a source file to get started."
-
-### Agent Panel — First Visit
-
-When agent panel opens for the first time, a brief onboarding card appears above the tiles:
-- Heading: "Meet your AI agents" in `text-primary`
-- Body: "CareMap has two specialized agents. The Builder helps you profile and map data. The Analyst answers questions about your harmonized data." in `text-secondary`
-- "Got it" dismiss button
+When no conversation exists, the panel shows a centered empty state:
+- CareMap AI icon (sparkles) with indigo gradient background
+- Heading: "CareMap AI" in `text-primary`
+- Description: "Ask me to profile your data, suggest mappings, generate charts, or explore insights." in `text-secondary`
+- "Try asking" section with 3 clickable suggestion buttons
+- Clicking a suggestion populates the chat input (does not send)
 
 ### Error — LLM Call Failure
 
