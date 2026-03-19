@@ -5,6 +5,7 @@ import { getSignedUrl } from "./storage.js";
 export interface SandboxOptions {
   timeoutMs?: number;
   maxResultRows?: number;
+  maxRetries?: number;
   onStdout?: (line: string) => void;
   onStderr?: (line: string) => void;
 }
@@ -14,10 +15,32 @@ export interface ExecutionResult {
   stderr: string;
   exitCode: number;
   results: unknown[];
+  retryCount: number;
 }
 
 const DEFAULT_TIMEOUT = 30_000;
 const DEFAULT_MAX_ROWS = 1000;
+const DEFAULT_MAX_RETRIES = 2;
+
+const TRANSIENT_ERROR_PATTERNS = [
+  "port is not open",
+  "sandbox timeout",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "socket hang up",
+  "502",
+  "503",
+  "504",
+];
+
+function isTransientError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return TRANSIENT_ERROR_PATTERNS.some((p) => msg.includes(p));
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export async function createSandbox(): Promise<Sandbox> {
   const templateId = env.E2B_TEMPLATE_ID ?? "code-interpreter-v1";
@@ -39,10 +62,10 @@ export async function getSignedFileUrls(
   return results;
 }
 
-export async function executeInSandbox(
+async function executeOnce(
   code: string,
-  fileUrls: Array<{ path: string; url: string }> = [],
-  opts: SandboxOptions = {},
+  fileUrls: Array<{ path: string; url: string }>,
+  opts: SandboxOptions,
 ): Promise<ExecutionResult> {
   const maxRows = opts.maxResultRows ?? DEFAULT_MAX_ROWS;
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT;
@@ -94,10 +117,47 @@ if '_result' in dir() and isinstance(_result, list) and len(_result) > ${maxRows
       stderr: (stderr.trim() + "\n" + errorMsg).trim(),
       exitCode: execution.error ? 1 : 0,
       results: execution.results?.map((r) => r.text ?? r) ?? [],
+      retryCount: 0,
     };
   } finally {
     await sandbox.kill().catch(() => {});
   }
+}
+
+export async function executeInSandbox(
+  code: string,
+  fileUrls: Array<{ path: string; url: string }> = [],
+  opts: SandboxOptions = {},
+): Promise<ExecutionResult> {
+  const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await executeOnce(code, fileUrls, opts);
+      result.retryCount = attempt;
+
+      if (result.exitCode !== 0 && attempt < maxRetries && isTransientError(result.stderr)) {
+        const backoff = 1000 * 2 ** attempt;
+        await sleep(backoff);
+        continue;
+      }
+
+      return result;
+    } catch (err) {
+      lastError = err;
+
+      if (attempt < maxRetries && isTransientError(err)) {
+        const backoff = 1000 * 2 ** attempt;
+        await sleep(backoff);
+        continue;
+      }
+
+      throw err;
+    }
+  }
+
+  throw lastError ?? new Error("Sandbox execution failed after retries");
 }
 
 export async function executeWithFileUpload(

@@ -60,6 +60,18 @@ async function resolveAcceptedMappingIds(sourceFileIds: string[]): Promise<strin
   return (data ?? []).map((m) => m.id as string);
 }
 
+async function hasActiveSchema(projectId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("target_schemas")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  return !!data;
+}
+
 async function resolveSourceFilename(sourceFileId: string): Promise<string> {
   const { data } = await supabase
     .from("source_files")
@@ -107,7 +119,14 @@ export const pipelineRoutes: FastifyPluginAsync = async (app) => {
         const sourceFileIds =
           (context?.sourceFileIds as string[]) || await resolveConnectedSourceFileIds(nodeId);
         if (!sourceFileIds.length) throw new ValidationError("No connected source files found for this mapping node");
-        userMessage = `Project ID: ${projectId}. Source nodes have been connected to mapping node ${nodeId}. Please propose field mappings for all connected sources. Source file IDs: ${JSON.stringify(sourceFileIds)}`;
+
+        const schemaExists = await hasActiveSchema(projectId);
+
+        if (schemaExists) {
+          userMessage = `Project ID: ${projectId}. Source nodes have been connected to mapping node ${nodeId}. An active target schema already exists. Please propose field mappings for all connected sources. Source file IDs: ${JSON.stringify(sourceFileIds)}`;
+        } else {
+          userMessage = `Project ID: ${projectId}. Source nodes have been connected to mapping node ${nodeId}. There is NO active target schema yet. First, use the propose_target_schema tool to analyze all source profiles and design a target schema. Source file IDs: ${JSON.stringify(sourceFileIds)}. After proposing the schema, DO NOT proceed to mapping — the user needs to review and activate the schema first.`;
+        }
         break;
       }
 

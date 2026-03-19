@@ -10,41 +10,62 @@ export const proposeMappingsTool = tool({
     sourceFileIds: z.array(z.string().uuid()),
   }),
   execute: async ({ projectId, sourceFileIds }) => {
-    const allMappings = [];
+    try {
+      const allMappings = [];
 
-    for (const sourceFileId of sourceFileIds) {
-      const { data: profiles } = await supabase
-        .from("source_profiles")
-        .select()
-        .eq("source_file_id", sourceFileId);
+      for (const sourceFileId of sourceFileIds) {
+        const { data: profiles } = await supabase
+          .from("source_profiles")
+          .select()
+          .eq("source_file_id", sourceFileId);
 
-      if (!profiles?.length) continue;
+        if (!profiles?.length) continue;
 
-      const columnProfiles = profiles.map((p) => ({
-        columnName: p.column_name,
-        inferredType: p.inferred_type,
-        semanticLabel: p.semantic_label,
-        domain: p.domain,
-        confidence: p.confidence,
-        sampleValues: p.sample_values ?? [],
-      }));
+        const columnProfiles = profiles.map((p) => ({
+          columnName: p.column_name,
+          inferredType: p.inferred_type,
+          semanticLabel: p.semantic_label,
+          domain: p.domain,
+          confidence: p.confidence,
+          sampleValues: p.sample_values ?? [],
+        }));
 
-      const mappings = await generateMappings(projectId, sourceFileId, columnProfiles);
-      allMappings.push(...mappings);
+        const mappings = await generateMappings(projectId, sourceFileId, columnProfiles);
+        allMappings.push(...mappings);
+      }
+
+      if (allMappings.length === 0) {
+        return {
+          success: false,
+          error: "No mappings generated. Source files may have no profiles or no active target schema.",
+          suggestion: "Ensure source files are profiled and an active target schema exists for the project.",
+        };
+      }
+
+      return {
+        success: true,
+        mappings: allMappings.map((m) => ({
+          id: m.id,
+          sourceColumn: m.source_column,
+          targetTable: m.target_table,
+          targetColumn: m.target_column,
+          confidence: m.confidence,
+          reasoning: m.reasoning,
+          status: m.status,
+        })),
+        totalMappings: allMappings.length,
+        autoAccepted: allMappings.filter((m) => m.status === "accepted").length,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        error: message,
+        retryable: message.includes("Empty response") || message.includes("JSON"),
+        suggestion: message.includes("No active schema")
+          ? "No active target schema found. Propose and activate a target schema first."
+          : "An error occurred during mapping. Try calling propose_mappings again.",
+      };
     }
-
-    return {
-      mappings: allMappings.map((m) => ({
-        id: m.id,
-        sourceColumn: m.source_column,
-        targetTable: m.target_table,
-        targetColumn: m.target_column,
-        confidence: m.confidence,
-        reasoning: m.reasoning,
-        status: m.status,
-      })),
-      totalMappings: allMappings.length,
-      autoAccepted: allMappings.filter((m) => m.status === "accepted").length,
-    };
   },
 });

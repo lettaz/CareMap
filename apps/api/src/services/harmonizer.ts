@@ -197,13 +197,40 @@ export async function harmonize(
   const result = await executeInSandbox(fullCode, [], opts);
 
   if (result.exitCode !== 0) {
-    throw new Error(`Harmonization failed: ${result.stderr}`);
+    const errDetail = result.stderr || result.stdout || "(no output captured)";
+    throw new Error(`Harmonization sandbox error (exit=${result.exitCode}, retries=${result.retryCount}): ${errDetail}`);
   }
 
   const manifestLine = result.stdout.split("\n").filter((l) => l.startsWith("{")).pop();
-  const manifest = manifestLine
-    ? (JSON.parse(manifestLine) as { tables: Array<{ name: string; rows: number; columns: string[] }> })
-    : { tables: [] };
+
+  if (!manifestLine) {
+    throw new Error(
+      `Harmonization produced no output manifest. ` +
+      `stdout: ${result.stdout.slice(0, 500) || "(empty)"}. ` +
+      `stderr: ${result.stderr.slice(0, 500) || "(empty)"}`
+    );
+  }
+
+  let manifest: { tables: Array<{ name: string; rows: number; columns: string[] }> };
+  try {
+    manifest = JSON.parse(manifestLine);
+  } catch {
+    throw new Error(`Harmonization manifest is malformed JSON: ${manifestLine.slice(0, 300)}`);
+  }
+
+  if (!manifest.tables?.length) {
+    throw new Error(
+      `Harmonization completed but produced zero tables. ` +
+      `This may indicate mapping/transformation issues. ` +
+      `stdout: ${result.stdout.slice(0, 500)}`
+    );
+  }
+
+  const emptyTables = manifest.tables.filter((t) => t.rows === 0);
+  if (emptyTables.length > 0) {
+    const names = emptyTables.map((t) => t.name).join(", ");
+    console.warn(`[harmonizer] Warning: tables with zero rows: ${names}`);
+  }
 
   const parquetPaths: string[] = [];
   for (const table of manifest.tables) {

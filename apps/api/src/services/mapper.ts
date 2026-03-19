@@ -4,37 +4,57 @@ import { supabase } from "../config/supabase.js";
 import { AIServiceError, NotFoundError } from "../lib/errors.js";
 import type { FieldMappingRow, FieldMappingInsert } from "../lib/types/database.js";
 
-const CANONICAL_SCHEMA = `Canonical clinical data model tables and columns:
+interface TargetTable {
+  name: string;
+  description?: string;
+  columns: Array<{ name: string; type: string; description?: string; required?: boolean }>;
+}
 
-patients: id, external_id, birth_year, gender
-encounters: id, patient_id, type, ward, start_date, end_date
-diagnoses: id, encounter_id, code, code_system, description, date
-lab_results: id, encounter_id, test_code, test_name, value, unit, reference_range, measured_at
-vital_signs: id, encounter_id, type, value, unit, measured_at
-medications: id, encounter_id, drug_name, drug_code, dose, unit, frequency, start_date, end_date
-care_assessments: id, encounter_id, patient_id, assessment_type, score, scale_min, scale_max, assessed_at, assessor
-care_interventions: id, encounter_id, intervention_type, description, start_date, end_date, status
-sensor_readings: id, patient_id, sensor_type, value, unit, measured_at
-staff_schedules: id, staff_id, ward, role, shift_start, shift_end`;
+async function getProjectSchema(projectId: string): Promise<string> {
+  const { data } = await supabase
+    .from("target_schemas")
+    .select("tables")
+    .eq("project_id", projectId)
+    .eq("status", "active")
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-const MAPPING_SYSTEM_PROMPT = `You are a clinical data mapping assistant for CareMap.
+  if (!data) {
+    throw new Error(
+      "No active target schema for this project. " +
+      "Propose and activate a schema before mapping.",
+    );
+  }
 
-Given source column profiles (with inferred types, semantic labels, sample values) and the canonical clinical data model, propose a mapping for each source column.
+  const tables = data.tables as TargetTable[];
+  return tables
+    .map((t) => `${t.name}: ${t.columns.map((c) => c.name).join(", ")}`)
+    .join("\n");
+}
+
+function buildMappingPrompt(schemaText: string): string {
+  return `You are a data mapping assistant for CareMap.
+
+Given source column profiles (with inferred types, semantic labels, sample values) and the target data model, propose a mapping for each source column.
 
 For each column provide:
 - sourceColumn: exact column name from the source
-- targetTable: which canonical table this maps to
+- targetTable: which target table this maps to
 - targetColumn: which column in that table
 - confidence: 0-1 score
 - reasoning: one-sentence plain-language explanation of why this mapping makes sense
 - transformation: SQL expression if a transformation is needed (e.g., "CAST(value AS INTEGER)", "value * 0.0113"), or null if direct copy
 
-Column names may be in German. Consider clinical context when mapping.
+Column names may be in any language. Translate and consider domain context when mapping.
 
 Return valid JSON array:
 [{ "sourceColumn": "...", "targetTable": "...", "targetColumn": "...", "confidence": 0.92, "reasoning": "...", "transformation": null }, ...]
 
-${CANONICAL_SCHEMA}`;
+Target data model tables and columns:
+
+${schemaText}`;
+}
 
 interface SourceColumnContext {
   columnName: string;
@@ -50,10 +70,12 @@ export async function generateMappings(
   sourceFileId: string,
   columnProfiles: SourceColumnContext[],
 ): Promise<FieldMappingRow[]> {
+  const schemaText = await getProjectSchema(projectId);
+
   const { text: content } = await generateText({
     model: getModel(),
     messages: [
-      { role: "system", content: MAPPING_SYSTEM_PROMPT },
+      { role: "system", content: buildMappingPrompt(schemaText) },
       {
         role: "user",
         content: `Source columns:\n${JSON.stringify(columnProfiles, null, 2)}`,

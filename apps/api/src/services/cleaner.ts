@@ -123,22 +123,38 @@ print("__PARQUET_SIZE__:" + str(len(_parquet_bytes)))
   const result = await executeInSandbox(fullCode, fileUrls, opts);
 
   if (result.exitCode !== 0) {
+    const errDetail = result.stderr || result.stdout || "(no output captured)";
     await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFileId);
-    throw new Error(`Cleaning failed: ${result.stderr}`);
+    throw new Error(`Cleaning sandbox error (exit=${result.exitCode}, retries=${result.retryCount}): ${errDetail}`);
   }
 
   const outputLine = result.stdout
     .split("\n")
     .find((l) => l.startsWith("{"));
 
-  const cleanResult = outputLine
-    ? (JSON.parse(outputLine) as { rowsBefore: number; rowsAfter: number; columnsCleaned: number; summary: Record<string, { before: string; after: string }> })
-    : { rowsBefore: 0, rowsAfter: 0, columnsCleaned: actions.length, summary: {} };
+  if (!outputLine) {
+    await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFileId);
+    throw new Error(
+      `Cleaning produced no output. ` +
+      `stdout: ${result.stdout.slice(0, 500) || "(empty)"}. ` +
+      `stderr: ${result.stderr.slice(0, 500) || "(empty)"}`
+    );
+  }
+
+  let cleanResult: { rowsBefore: number; rowsAfter: number; columnsCleaned: number; summary: Record<string, { before: string; after: string }> };
+  try {
+    cleanResult = JSON.parse(outputLine);
+  } catch {
+    await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFileId);
+    throw new Error(`Cleaning output is malformed JSON: ${outputLine.slice(0, 300)}`);
+  }
+
+  if (cleanResult.rowsAfter === 0 && cleanResult.rowsBefore > 0) {
+    console.warn(`[cleaner] Warning: cleaning reduced ${cleanResult.rowsBefore} rows to 0 for source ${sourceFileId}`);
+  }
 
   const storageDest = cleanedPath(projectId, sourceFileId);
 
-  // In production, we'd download the parquet from the sandbox and upload to storage.
-  // For now, we mark the path and status update.
   await supabase
     .from("source_files")
     .update({ cleaned_path: storageDest, status: "clean" })

@@ -18,6 +18,12 @@ Key behaviors:
 - For chart suggestions, use the generate_artifact tool.
 - For destructive operations (cleaning, harmonizing), explain what you plan to do before executing.
 - When querying data, write DuckDB SQL for structured queries or pandas for complex analytics.
+
+Error handling:
+- Tool results include a "success" field. If success is false, read the "error" and "suggestion" fields.
+- If "retryable" is true, you MAY retry the same tool call once. If it fails again, report the error to the user.
+- Never silently ignore a failed tool result. Always inform the user what happened and what they can do.
+- If a tool fails due to missing prerequisites (no schema, no profiles, etc.), guide the user through the required steps.
 `;
 
 async function buildSystemPrompt(projectId: string, mode: AgentMode): Promise<string> {

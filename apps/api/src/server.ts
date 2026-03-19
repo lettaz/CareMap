@@ -14,6 +14,7 @@ import { semanticRoutes } from "./routes/semantic.js";
 import { pipelineRoutes } from "./routes/pipeline.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { stepLogRoutes } from "./routes/step-logs.js";
+import { schemaRoutes } from "./routes/schemas.js";
 
 const app = Fastify({
   logger: {
@@ -55,6 +56,7 @@ await app.register(semanticRoutes, { prefix: "/api/projects" });
 await app.register(pipelineRoutes, { prefix: "/api/projects" });
 await app.register(conversationRoutes, { prefix: "/api/projects" });
 await app.register(stepLogRoutes, { prefix: "/api/projects" });
+await app.register(schemaRoutes, { prefix: "/api/projects" });
 
 app.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString() }));
 

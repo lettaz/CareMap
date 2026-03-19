@@ -11,7 +11,7 @@ const cleaningActionSchema = z.object({
 });
 
 export const executeCleaningTool = tool({
-  description: "Apply the approved cleaning plan to a source file. Runs pandas transforms in an E2B sandbox and writes a cleaned Parquet file to Supabase Storage.",
+  description: "Apply the approved cleaning plan to a source file. Runs pandas transforms in an E2B sandbox and writes a cleaned file to Supabase Storage.",
   inputSchema: z.object({
     projectId: z.string().uuid(),
     sourceFileId: z.string().uuid(),
@@ -19,6 +19,24 @@ export const executeCleaningTool = tool({
   }),
   needsApproval: async (input) => !(await isYoloMode(input.projectId)),
   execute: async ({ projectId, sourceFileId, actions }) => {
-    return executeCleaning(projectId, sourceFileId, actions as CleaningAction[]);
+    try {
+      const result = await executeCleaning(projectId, sourceFileId, actions as CleaningAction[]);
+      return {
+        success: true,
+        ...result,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const isRetryable = message.includes("sandbox") || message.includes("ECONN") || message.includes("port");
+      return {
+        success: false,
+        error: message,
+        sourceFileId,
+        retryable: isRetryable,
+        suggestion: isRetryable
+          ? "This was a transient sandbox failure. Try calling execute_cleaning again with the same parameters."
+          : "Check the cleaning actions for invalid column names or incompatible transformations.",
+      };
+    }
   },
 });
