@@ -22,3 +22,7 @@ pnpm-debug.log*
 
 skills-lock.json
 pnpm-lock.yaml
+
+# Cursor / agent local config
+.cursor/
+.agents/
