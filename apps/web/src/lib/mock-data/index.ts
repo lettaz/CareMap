@@ -1,6 +1,6 @@
 export { MOCK_SOURCES } from "./sources";
 export { MOCK_PROFILES } from "./profiles";
-export { MOCK_MAPPINGS } from "./mappings";
+export { MOCK_MAPPINGS, MOCK_TARGET_TABLES, MOCK_ORPHAN_COLUMNS, MOCK_JOIN_KEYS } from "./mappings";
 export {
   MOCK_CARE_ASSESSMENTS,
   MOCK_LAB_RESULTS,

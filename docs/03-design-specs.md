@@ -74,14 +74,16 @@ Full-bleed ReactFlow canvas with two contextual panels. The canvas uses a subtle
 
 Triggered by a floating "+" button at top-left of the canvas. Button has `bg-surface` background, `border-primary` border, and an `accent` icon. Opens a narrow drawer listing available node types, grouped by category with section headers. Each item shows an icon, name, and one-line description. User drags an item from the palette onto the canvas to create a node. Palette closes automatically after a drop.
 
-Categories and their visual colour:
+Categories, their visual colour, and each node's responsibility:
 
-| Category | Colour | Nodes |
-|---|---|---|
-| Sources (blue) | `#3B82F6` | CSV Source, Excel Source, PDF Source, Text Source |
-| Transforms (emerald) | `#059669` | Mapping |
-| Quality (amber) | `#D97706` | Quality Check |
-| Sinks (indigo) | `#6366F1` | Harmonized Store |
+| Category | Colour | Nodes | Responsibility |
+|---|---|---|---|
+| Sources (blue) | `#3B82F6` | CSV Source, Excel Source, PDF Source, Text Source | Ingest, parse, and AI-profile a single data file. Outputs a profiled dataset. |
+| Transforms (emerald) | `#059669` | Mapping | Align one or more profiled sources to the canonical clinical model. AI proposes column mappings, detects joins, derives constants. User reviews target-by-target. |
+| Quality (amber) | `#D97706` | Quality Check | Validate data after transformation: null rates, range checks, duplicates, format issues. |
+| Sinks (indigo) | `#6366F1` | Harmonized Store | Write validated, mapped data into the canonical Supabase tables. |
+
+**Pipeline principle:** Each node does one job. Source nodes profile. Mapping nodes align. Quality nodes validate. Sink nodes write. Users can compose these in any order, and each node's panel shows exactly what that node's job produced. The AI helps at every step, but the user always reviews and approves.
 
 ### Node Visual Design
 
@@ -136,21 +138,31 @@ A stateful panel with three phases:
    - Column headers clickable for popover showing type, semantic label, confidence, sample values
    - Contextual AI prompt chips at the bottom
 
-**For mapping nodes — Mapping Detail Panel:**
+**For mapping nodes — Mapping Detail Panel (Target-Centric):**
 
-A comprehensive per-field mapping review interface:
-- Header: Editable label, node summary (total mappings, accepted, pending), "Back to Chat" button
-- Summary bar: Overall confidence bar, breakdown badges (auto-mapped, needs review, unmapped)
-- Actions bar: "Show issues only" filter toggle, "Auto-accept high confidence" button
-- Mapping table: One row per field showing:
-  - Source column name
-  - Sample value from source data
-  - Target table.column (with arrow indicator)
-  - Confidence percentage (colour-coded)
-  - Status badge (accepted/pending/rejected/unmapped)
-  - Expandable reasoning section with AI explanation and transformation rule
-  - Accept/Reject/Reset action buttons per row
-- AI prompt chips at the bottom (contextual to issue count)
+The mapping panel answers: "What does each target table look like when assembled?" — not just "Where does each source column go?"
+
+**Layout:**
+- Header: Editable label, global stats (N target tables, N columns, N need attention)
+- Global summary badges: mapped, derived, review, gaps, orphans
+- Tabbed interface with one tab per target table + Joins tab + Orphans tab
+- AI prompt chips at bottom (contextual to active tab)
+
+**Each target table tab shows:**
+- Table header: canonical table name, completion badge (N/M covered), source files contributing
+- Column list ordered by schema position, each row showing:
+  - Target column name, data type, required badge
+  - Status: Mapped (green), Derived (indigo), Review (amber), Gap (red)
+  - Source column preview (← sourceColumn) for mapped columns
+  - Expandable detail showing: source file reference with sample value, confidence, AI reasoning, transformation rule, and accept/reject buttons for pending mappings
+  - For gaps: explanation of what's missing + whether required or optional
+  - For derived columns: derivation logic (e.g., "assessment_type derived from column name")
+
+**Joins tab:** Shows detected relationships between target tables, with the shared source column that enables the join and a confidence score per relationship.
+
+**Orphans tab:** Lists source columns that have no target. Each orphan shows its sample value, low confidence score, and buttons to "Suggest target" or "Discard."
+
+**Key insight:** Multiple score-type source columns (Sturzrisiko_Skala, Mobilität, Ernährung, etc.) map to the same target column (care_assessments.score) via row pivoting — each becomes a separate row with a derived assessment_type. The target-centric view makes this transformation strategy visible.
 
 **For quality check nodes:**
 - Quality metrics: completeness percentages, range check results, detected anomalies.

@@ -4,6 +4,7 @@ export type NodeCategory = "source" | "transform" | "quality" | "sink";
 export type NodeStatus = "ready" | "running" | "warning" | "error" | "idle";
 export type FileType = "csv" | "xlsx" | "pdf" | "txt";
 export type MappingStatus = "pending" | "accepted" | "rejected";
+export type TargetColumnStatus = "mapped" | "partial" | "gap" | "derived";
 export type AlertSeverity = "critical" | "warning" | "info";
 
 export interface PipelineNodeData extends Record<string, unknown> {
@@ -54,6 +55,41 @@ export interface FieldMapping {
   reasoning: string;
   status: MappingStatus;
   transformation?: string;
+}
+
+export interface TargetColumn {
+  column: string;
+  dataType: string;
+  required: boolean;
+  description: string;
+  status: TargetColumnStatus;
+  sourceMapping?: {
+    sourceFileId: string;
+    sourceColumn: string;
+    sampleValue?: string;
+    confidence: number;
+    transformation?: string;
+    reasoning: string;
+    mappingStatus: MappingStatus;
+  };
+  derivedValue?: string;
+}
+
+export interface TargetTableMapping {
+  targetTable: string;
+  label: string;
+  sourceFileIds: string[];
+  columns: TargetColumn[];
+  joinKeys: JoinKey[];
+}
+
+export interface JoinKey {
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+  sharedSourceColumn: string;
+  confidence: number;
 }
 
 export interface QualityAlert {
