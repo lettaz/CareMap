@@ -15,6 +15,23 @@ export interface PipelineNodeData extends Record<string, unknown> {
   rowCount?: number;
   columnCount?: number;
   mappedCount?: number;
+  /** Source-specific */
+  fileType?: FileType;
+  domain?: string;
+  description?: string;
+  /** Mapping-specific */
+  sourceCount?: number;
+  totalFields?: number;
+  confidenceAvg?: number;
+  /** Quality-specific */
+  checksPass?: number;
+  checksWarn?: number;
+  checksFail?: number;
+  /** Sink-specific */
+  targetTable?: string;
+  lastSyncAt?: string;
+  /** Issue indicator — count of problems requiring attention */
+  issueCount?: number;
 }
 
 export type PipelineNode = Node<PipelineNodeData>;
