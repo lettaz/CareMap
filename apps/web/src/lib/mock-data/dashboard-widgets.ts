@@ -1,4 +1,71 @@
-import type { PinnedWidget } from "../types";
+import type { PinnedWidget, DashboardSourceSummary, CompletenessData } from "../types";
+
+export const MOCK_DASHBOARD_SOURCES: DashboardSourceSummary[] = [
+  {
+    id: "src-001",
+    filename: "care_assessments.csv",
+    fileType: "csv",
+    status: "ready",
+    rowCount: 247,
+    columnCount: 12,
+    mappedFields: 10,
+    unmappedFields: 2,
+    lastSyncAt: "2026-03-14T14:05:00Z",
+    uploadedAt: "2026-03-14T09:23:00Z",
+    domain: "care_assessments",
+  },
+  {
+    id: "src-002",
+    filename: "lab_results.xlsx",
+    fileType: "xlsx",
+    status: "ready",
+    rowCount: 247,
+    columnCount: 8,
+    mappedFields: 7,
+    unmappedFields: 1,
+    lastSyncAt: "2026-03-14T14:08:00Z",
+    uploadedAt: "2026-03-14T09:25:00Z",
+    domain: "lab_results",
+  },
+];
+
+export const MOCK_COMPLETENESS: CompletenessData = {
+  fields: [
+    "patient_id",
+    "encounter_id",
+    "assessment_type",
+    "score",
+    "assessed_at",
+    "assessor",
+    "ward",
+    "start_date",
+    "end_date",
+    "test_name",
+    "test_code",
+    "value",
+    "unit",
+    "reference_range",
+    "measured_at",
+  ],
+  buckets: ["A1", "A2", "B1", "B2", "C1"],
+  values: {
+    patient_id:      { A1: 100, A2: 98,  B1: 96,  B2: 92,  C1: 100 },
+    encounter_id:    { A1: 100, A2: 97,  B1: 95,  B2: 90,  C1: 99  },
+    assessment_type: { A1: 100, A2: 100, B1: 100, B2: 100, C1: 100 },
+    score:           { A1: 95,  A2: 88,  B1: 91,  B2: 74,  C1: 97  },
+    assessed_at:     { A1: 98,  A2: 93,  B1: 94,  B2: 85,  C1: 97  },
+    assessor:        { A1: 88,  A2: 82,  B1: 79,  B2: 68,  C1: 90  },
+    ward:            { A1: 100, A2: 100, B1: 100, B2: 100, C1: 100 },
+    start_date:      { A1: 97,  A2: 91,  B1: 93,  B2: 78,  C1: 96  },
+    end_date:        { A1: 72,  A2: 65,  B1: 68,  B2: 52,  C1: 74  },
+    test_name:       { A1: 100, A2: 99,  B1: 98,  B2: 96,  C1: 100 },
+    test_code:       { A1: 85,  A2: 80,  B1: 78,  B2: 62,  C1: 87  },
+    value:           { A1: 99,  A2: 97,  B1: 96,  B2: 91,  C1: 99  },
+    unit:            { A1: 98,  A2: 95,  B1: 94,  B2: 88,  C1: 97  },
+    reference_range: { A1: 90,  A2: 86,  B1: 84,  B2: 65,  C1: 91  },
+    measured_at:     { A1: 97,  A2: 94,  B1: 92,  B2: 83,  C1: 96  },
+  },
+};
 
 export const MOCK_PINNED_WIDGETS: PinnedWidget[] = [
   {

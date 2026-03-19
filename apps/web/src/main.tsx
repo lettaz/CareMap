@@ -16,15 +16,15 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <ProjectsPage /> },
       { path: "settings", element: <SettingsPage /> },
-    ],
-  },
-  {
-    path: "projects/:projectId",
-    element: <ProjectShell />,
-    children: [
-      { index: true, element: <Navigate to="canvas" replace /> },
-      { path: "canvas", element: <CanvasPage /> },
-      { path: "dashboard", element: <DashboardPage /> },
+      {
+        path: "projects/:projectId",
+        element: <ProjectShell />,
+        children: [
+          { index: true, element: <Navigate to="canvas" replace /> },
+          { path: "canvas", element: <CanvasPage /> },
+          { path: "dashboard", element: <DashboardPage /> },
+        ],
+      },
     ],
   },
 ]);
@@ -34,5 +34,5 @@ createRoot(document.getElementById("root")!).render(
     <TooltipProvider>
       <RouterProvider router={router} />
     </TooltipProvider>
-  </StrictMode>
+  </StrictMode>,
 );

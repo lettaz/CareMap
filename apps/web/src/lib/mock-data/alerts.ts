@@ -11,6 +11,11 @@ export const MOCK_ALERTS: QualityAlert[] = [
     detectionMethod: "reference_range_validation",
     acknowledged: false,
     createdAt: "2026-03-14T10:12:00Z",
+    affectedRecords: [
+      { rowIndex: 42, values: { PatientNr: "P-10078", Laborwert: "CRP", Ergebnis: 48.5, Einheit: "mg/L", Referenzbereich: "0–5" }, anomalousFields: ["Ergebnis"] },
+      { rowIndex: 87, values: { PatientNr: "P-10112", Laborwert: "CRP", Ergebnis: 85.3, Einheit: "mg/L", Referenzbereich: "0–5" }, anomalousFields: ["Ergebnis"] },
+      { rowIndex: 153, values: { PatientNr: "P-10034", Laborwert: "Kreatinin", Ergebnis: 2.3, Einheit: "mg/dL", Referenzbereich: "0.6–1.2" }, anomalousFields: ["Ergebnis"] },
+    ],
   },
   {
     id: "alert-002",
@@ -22,6 +27,13 @@ export const MOCK_ALERTS: QualityAlert[] = [
     detectionMethod: "null_check",
     acknowledged: false,
     createdAt: "2026-03-14T10:14:00Z",
+    affectedRecords: [
+      { rowIndex: 15, values: { PatientNr: null, Sturzrisiko_Skala: 2, Station: "B2", Datum: "2026-03-10" }, anomalousFields: ["PatientNr"] },
+      { rowIndex: 48, values: { PatientNr: null, Sturzrisiko_Skala: 3, Station: "B2", Datum: "2026-03-11" }, anomalousFields: ["PatientNr"] },
+      { rowIndex: 92, values: { PatientNr: null, Sturzrisiko_Skala: 1, Station: "A1", Datum: "2026-03-12" }, anomalousFields: ["PatientNr"] },
+      { rowIndex: 178, values: { PatientNr: null, Sturzrisiko_Skala: 4, Station: "B1", Datum: "2026-03-13" }, anomalousFields: ["PatientNr"] },
+      { rowIndex: 201, values: { PatientNr: null, Sturzrisiko_Skala: 0, Station: "C1", Datum: "2026-03-14" }, anomalousFields: ["PatientNr"] },
+    ],
   },
   {
     id: "alert-003",

@@ -10,6 +10,9 @@ export {
 export { MOCK_ALERTS } from "./alerts";
 export { MOCK_CONVERSATION } from "./conversations";
 export { MOCK_PINNED_WIDGETS } from "./dashboard-widgets";
+export { MOCK_DASHBOARD_SOURCES, MOCK_COMPLETENESS } from "./dashboard-widgets";
 export { MOCK_ENTITIES, MOCK_JOINS } from "./semantic-layer";
 export { MOCK_PROJECTS } from "./projects";
 export { MOCK_SOURCE_PREVIEWS, type SourcePreview, type SourcePreviewColumn } from "./source-preview";
+export { MOCK_LINEAGE } from "./lineage";
+export { MOCK_CORRECTIONS } from "./corrections";

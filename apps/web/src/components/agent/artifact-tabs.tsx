@@ -10,8 +10,10 @@ import {
   LineChart,
   Line,
 } from "recharts";
-import { Table2, BarChart3, FileText, Plus } from "lucide-react";
-import type { ArtifactTab } from "@/lib/types";
+import { Table2, BarChart3, FileText, Plus, Pin, Check } from "lucide-react";
+import type { ArtifactTab, ChartSpec } from "@/lib/types";
+import { useDashboardStore } from "@/lib/stores/dashboard-store";
+import { useActiveProject } from "@/hooks/use-active-project";
 import { cn } from "@/lib/utils";
 
 const TAB_ICONS = {
@@ -22,9 +24,10 @@ const TAB_ICONS = {
 
 interface ArtifactTabsProps {
   tabs: ArtifactTab[];
+  queryText?: string;
 }
 
-export function ArtifactTabs({ tabs }: ArtifactTabsProps) {
+export function ArtifactTabs({ tabs, queryText }: ArtifactTabsProps) {
   const [activeId, setActiveId] = useState(tabs[0]?.id ?? "");
   const active = tabs.find((t) => t.id === activeId);
 
@@ -70,7 +73,7 @@ export function ArtifactTabs({ tabs }: ArtifactTabsProps) {
           <TableContent columns={active.tableData.columns} rows={active.tableData.rows} />
         )}
         {active?.type === "chart" && active.chartSpec && (
-          <ChartContent spec={active.chartSpec} />
+          <ChartContent spec={active.chartSpec} queryText={queryText} />
         )}
       </div>
     </div>
@@ -142,12 +145,54 @@ function TableContent({ columns, rows }: { columns: string[]; rows: (string | nu
   );
 }
 
-function ChartContent({ spec }: { spec: NonNullable<ArtifactTab["chartSpec"]> }) {
+function ChartContent({ spec, queryText }: { spec: ChartSpec; queryText?: string }) {
+  const { projectId } = useActiveProject();
+  const pinWidget = useDashboardStore((s) => s.pinWidget);
+  const [pinned, setPinned] = useState(false);
   const chartColor = spec.color ?? "#4F46E5";
+
+  function handlePin() {
+    if (!projectId) return;
+    pinWidget(projectId, {
+      id: `widget-${Date.now()}`,
+      title: spec.title,
+      queryText: queryText ?? spec.title,
+      sqlQuery: "",
+      chartSpec: spec,
+      pinnedAt: new Date().toISOString(),
+    });
+    setPinned(true);
+    setTimeout(() => setPinned(false), 3000);
+  }
 
   return (
     <div>
-      <p className="mb-2 text-xs font-semibold text-cm-text-primary">{spec.title}</p>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-semibold text-cm-text-primary">{spec.title}</p>
+        <button
+          type="button"
+          onClick={handlePin}
+          disabled={pinned}
+          className={cn(
+            "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+            pinned
+              ? "bg-cm-success-subtle text-cm-success"
+              : "bg-cm-accent-subtle text-cm-accent hover:bg-cm-accent-muted",
+          )}
+        >
+          {pinned ? (
+            <>
+              <Check className="h-3 w-3" />
+              Pinned
+            </>
+          ) : (
+            <>
+              <Pin className="h-3 w-3" />
+              Pin to Dashboard
+            </>
+          )}
+        </button>
+      </div>
       <div className="h-48 w-full">
         <ResponsiveContainer width="100%" height="100%">
           {spec.type === "line" ? (
