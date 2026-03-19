@@ -1,9 +1,8 @@
-import { Link, NavLink } from "react-router-dom";
-import { Search, Settings, PanelRight, ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Search, PanelRight, ChevronRight } from "lucide-react";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useActiveProject } from "@/hooks/use-active-project";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 export function TopBar() {
   const togglePanel = useAgentStore((s) => s.togglePanel);
@@ -11,17 +10,25 @@ export function TopBar() {
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-cm-border-primary bg-cm-bg-surface px-4">
-      <div className="flex items-center gap-2 min-w-0">
-        <Link to="/" className="font-semibold text-lg text-cm-text-primary shrink-0 hover:opacity-80 transition-opacity">
+      <div className="flex min-w-0 items-center gap-2">
+        <Link
+          to="/"
+          className="shrink-0 text-lg font-semibold text-cm-text-primary transition-opacity hover:opacity-80"
+        >
           CareMap
         </Link>
-        <span className="rounded bg-cm-accent-subtle px-1.5 py-0.5 text-xs font-medium text-cm-accent shrink-0">
+        <span className="shrink-0 rounded bg-cm-accent-subtle px-1.5 py-0.5 text-xs font-medium text-cm-accent">
           alpha
         </span>
         {project && (
           <>
-            <ChevronRight className="h-4 w-4 text-cm-text-tertiary shrink-0" />
-            <span className="text-sm text-cm-text-secondary truncate">{project.name}</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-cm-text-tertiary" />
+            <Link
+              to={`/projects/${project.id}/canvas`}
+              className="truncate text-sm text-cm-text-secondary transition-colors hover:text-cm-text-primary"
+            >
+              {project.name}
+            </Link>
           </>
         )}
       </div>
@@ -38,16 +45,14 @@ export function TopBar() {
         </kbd>
       </button>
 
-      <div className="flex items-center gap-1 shrink-0">
-        <NavLink
-          to="/settings"
-          aria-label="Settings"
-          className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}
-        >
-          <Settings className="size-4" />
-        </NavLink>
+      <div className="flex shrink-0 items-center gap-1">
         {project && (
-          <Button variant="ghost" size="icon" onClick={togglePanel} aria-label="Toggle agent panel">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={togglePanel}
+            aria-label="Toggle agent panel"
+          >
             <PanelRight className="size-4" />
           </Button>
         )}

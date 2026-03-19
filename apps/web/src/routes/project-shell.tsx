@@ -4,8 +4,6 @@ import { useProjectStore } from "@/lib/stores/project-store";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
-import { TopBar } from "@/components/layout/top-bar";
-import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { RightPanel } from "@/components/layout/right-panel";
 
 export default function ProjectShell() {
@@ -34,15 +32,11 @@ export default function ProjectShell() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-cm-bg-app overflow-hidden">
-      <TopBar />
-      <div className="flex flex-1 overflow-hidden">
-        <SidebarNav />
-        <main className="flex-1 overflow-hidden">
-          <Outlet />
-        </main>
-        <RightPanel isCanvasRoute={isCanvasRoute} />
+    <div className="flex h-full flex-1 overflow-hidden">
+      <div className="h-full flex-1 overflow-hidden">
+        <Outlet />
       </div>
+      <RightPanel isCanvasRoute={isCanvasRoute} />
     </div>
   );
 }

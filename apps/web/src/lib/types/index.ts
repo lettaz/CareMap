@@ -15,6 +15,23 @@ export interface PipelineNodeData extends Record<string, unknown> {
   rowCount?: number;
   columnCount?: number;
   mappedCount?: number;
+  /** Source-specific */
+  fileType?: FileType;
+  domain?: string;
+  description?: string;
+  /** Mapping-specific */
+  sourceCount?: number;
+  totalFields?: number;
+  confidenceAvg?: number;
+  /** Quality-specific */
+  checksPass?: number;
+  checksWarn?: number;
+  checksFail?: number;
+  /** Sink-specific */
+  targetTable?: string;
+  lastSyncAt?: string;
+  /** Issue indicator — count of problems requiring attention */
+  issueCount?: number;
 }
 
 export type PipelineNode = Node<PipelineNodeData>;
@@ -92,6 +109,12 @@ export interface JoinKey {
   confidence: number;
 }
 
+export interface AffectedRecord {
+  rowIndex: number;
+  values: Record<string, string | number | null>;
+  anomalousFields: string[];
+}
+
 export interface QualityAlert {
   id: string;
   severity: AlertSeverity;
@@ -102,6 +125,7 @@ export interface QualityAlert {
   acknowledged: boolean;
   createdAt: string;
   timestamp?: string;
+  affectedRecords?: AffectedRecord[];
 }
 
 export interface PlanStep {
@@ -189,6 +213,59 @@ export interface PinnedWidget {
   sqlQuery: string;
   chartSpec: ChartSpec;
   pinnedAt: string;
+  lastRefreshedAt?: string;
+}
+
+/** Matches GET /api/dashboard → sources[] contract */
+export interface DashboardSourceSummary {
+  id: string;
+  filename: string;
+  fileType: FileType;
+  status: NodeStatus;
+  rowCount: number;
+  columnCount: number;
+  mappedFields: number;
+  unmappedFields: number;
+  lastSyncAt: string;
+  uploadedAt: string;
+  domain: string;
+}
+
+export interface DashboardKpis {
+  totalSources: number;
+  totalRowsHarmonized: number;
+  fieldsMapped: number;
+  fieldsTotal: number;
+  dataCompleteness: number;
+  openAlerts: number;
+}
+
+/** Heatmap data returned by backend, or assembled client-side from profiles */
+export interface CompletenessData {
+  fields: string[];
+  buckets: string[];
+  /** field → bucket → fill-rate percentage (0–100) */
+  values: Record<string, Record<string, number>>;
+}
+
+export interface LineageEntry {
+  metricLabel: string;
+  sourceFileId: string;
+  sourceColumn: string;
+  transformations: string[];
+  targetField: string;
+}
+
+export interface CorrectionEntry {
+  id: string;
+  timestamp: string;
+  action: "mapping_change" | "value_fix" | "schema_update" | "field_rename";
+  description: string;
+  sourceFileId?: string;
+  field?: string;
+  previousValue?: string;
+  newValue?: string;
+  appliedBy: "ai" | "user";
 }
 
 export interface SemanticEntity {
