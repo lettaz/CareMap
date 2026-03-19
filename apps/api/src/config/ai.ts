@@ -1,26 +1,31 @@
-import OpenAI from "openai";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import type { LanguageModel } from "ai";
 import { env } from "./env.js";
 
-function createAIClient(): OpenAI {
-  if (env.LLM_PROVIDER === "custom" && env.CUSTOM_LLM_BASE_URL) {
-    return new OpenAI({
-      baseURL: env.CUSTOM_LLM_BASE_URL,
+type SupportedProvider = "openai" | "anthropic" | "custom";
+
+const providers: Record<SupportedProvider, () => LanguageModel> = {
+  openai: () => {
+    const provider = createOpenAI({ apiKey: env.OPENAI_API_KEY ?? "" });
+    return provider(env.LLM_MODEL);
+  },
+  anthropic: () => {
+    const provider = createAnthropic({ apiKey: env.ANTHROPIC_API_KEY ?? "" });
+    return provider(env.LLM_MODEL);
+  },
+  custom: () => {
+    const provider = createOpenAI({
+      baseURL: env.CUSTOM_LLM_BASE_URL ?? "",
       apiKey: env.CUSTOM_LLM_API_KEY ?? "",
     });
-  }
+    return provider(env.CUSTOM_LLM_MODEL ?? env.LLM_MODEL);
+  },
+};
 
-  if (env.LLM_PROVIDER === "anthropic") {
-    return new OpenAI({
-      baseURL: "https://api.anthropic.com/v1",
-      apiKey: env.ANTHROPIC_API_KEY ?? "",
-      defaultHeaders: { "anthropic-version": "2023-06-01" },
-    });
-  }
-
-  return new OpenAI({ apiKey: env.OPENAI_API_KEY ?? "" });
+export function getModel(): LanguageModel {
+  return providers[env.LLM_PROVIDER]();
 }
-
-export const ai = createAIClient();
 
 export function getModelId(): string {
   if (env.LLM_PROVIDER === "custom" && env.CUSTOM_LLM_MODEL) {

@@ -1,0 +1,50 @@
+import { tool } from "ai";
+import { z } from "zod";
+import { generateMappings } from "../mapper.js";
+import { supabase } from "../../config/supabase.js";
+
+export const proposeMappingsTool = tool({
+  description: "Given cleaned source profiles and the canonical clinical schema, propose source-to-target column mappings with confidence scores, reasoning, and transformation rules.",
+  inputSchema: z.object({
+    projectId: z.string().uuid(),
+    sourceFileIds: z.array(z.string().uuid()),
+  }),
+  execute: async ({ projectId, sourceFileIds }) => {
+    const allMappings = [];
+
+    for (const sourceFileId of sourceFileIds) {
+      const { data: profiles } = await supabase
+        .from("source_profiles")
+        .select()
+        .eq("source_file_id", sourceFileId);
+
+      if (!profiles?.length) continue;
+
+      const columnProfiles = profiles.map((p) => ({
+        columnName: p.column_name,
+        inferredType: p.inferred_type,
+        semanticLabel: p.semantic_label,
+        domain: p.domain,
+        confidence: p.confidence,
+        sampleValues: p.sample_values ?? [],
+      }));
+
+      const mappings = await generateMappings(projectId, sourceFileId, columnProfiles);
+      allMappings.push(...mappings);
+    }
+
+    return {
+      mappings: allMappings.map((m) => ({
+        id: m.id,
+        sourceColumn: m.source_column,
+        targetTable: m.target_table,
+        targetColumn: m.target_column,
+        confidence: m.confidence,
+        reasoning: m.reasoning,
+        status: m.status,
+      })),
+      totalMappings: allMappings.length,
+      autoAccepted: allMappings.filter((m) => m.status === "accepted").length,
+    };
+  },
+});

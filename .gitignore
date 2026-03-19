@@ -23,6 +23,9 @@ pnpm-debug.log*
 skills-lock.json
 pnpm-lock.yaml
 
+# Clinical data (do not commit)
+data/
+
 # Cursor / agent local config
 .cursor/
 .agents/

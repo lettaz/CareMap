@@ -9,6 +9,11 @@ import { mappingRoutes } from "./routes/mappings.js";
 import { harmonizeRoutes } from "./routes/harmonize.js";
 import { chatRoutes } from "./routes/chat.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
+import { pipelineStateRoutes } from "./routes/pipeline-state.js";
+import { semanticRoutes } from "./routes/semantic.js";
+import { pipelineRoutes } from "./routes/pipeline.js";
+import { conversationRoutes } from "./routes/conversations.js";
+import { stepLogRoutes } from "./routes/step-logs.js";
 
 const app = Fastify({
   logger: {
@@ -45,6 +50,11 @@ await app.register(mappingRoutes, { prefix: "/api/mappings" });
 await app.register(harmonizeRoutes, { prefix: "/api/harmonize" });
 await app.register(chatRoutes, { prefix: "/api/chat" });
 await app.register(dashboardRoutes, { prefix: "/api/dashboard" });
+await app.register(pipelineStateRoutes, { prefix: "/api/projects" });
+await app.register(semanticRoutes, { prefix: "/api/projects" });
+await app.register(pipelineRoutes, { prefix: "/api/projects" });
+await app.register(conversationRoutes, { prefix: "/api/projects" });
+await app.register(stepLogRoutes, { prefix: "/api/projects" });
 
 app.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString() }));
 

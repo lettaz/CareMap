@@ -1,125 +1,150 @@
-import { ai, getModelId } from "../config/ai.js";
-import { supabase } from "../config/supabase.js";
-import { AIServiceError } from "../lib/errors.js";
+import { streamText, ToolLoopAgent, stepCountIs, createAgentUIStreamResponse } from "ai";
+import type { UIMessage } from "ai";
+import { getModel } from "../config/ai.js";
+import { allTools, pipelineTools, sharedTools } from "./tools/index.js";
+import { getSemanticContext } from "./semantic.js";
 
-interface ChatMessage {
-  role: "user" | "assistant" | "system";
-  content: string;
+type AgentMode = "pipeline" | "conversation";
+
+const BASE_SYSTEM_PROMPT = `You are CareMap AI, an intelligent assistant for healthcare data harmonization.
+
+You operate in two modes:
+1. **Pipeline mode**: You act as a data engineer — profiling, cleaning, mapping, and harmonizing clinical datasets.
+2. **Conversation mode**: You act as a data analyst — querying harmonized data, generating visualizations, and explaining lineage.
+
+Key behaviors:
+- Always show your reasoning. Reference specific tables, columns, and data sources.
+- Column names in source data may be in German — translate and explain.
+- For chart suggestions, use the generate_artifact tool.
+- For destructive operations (cleaning, harmonizing), explain what you plan to do before executing.
+- When querying data, write DuckDB SQL for structured queries or pandas for complex analytics.
+`;
+
+async function buildSystemPrompt(projectId: string, mode: AgentMode): Promise<string> {
+  const ctx = await getSemanticContext(projectId);
+
+  const sections = [BASE_SYSTEM_PROMPT];
+
+  sections.push(`\n## Project: ${ctx.projectName}`);
+  if (ctx.projectDescription) {
+    sections.push(`Description: ${ctx.projectDescription}`);
+  }
+
+  if (ctx.sources.length > 0) {
+    sections.push("\n## Source Files");
+    for (const s of ctx.sources) {
+      sections.push(`- ${s.filename} (${s.rowCount ?? "?"} rows, status: ${s.status})`);
+      if (s.columns.length > 0) {
+        const colList = s.columns.map((c) => `${c.name} [${c.type}${c.semanticLabel ? `: ${c.semanticLabel}` : ""}]`).join(", ");
+        sections.push(`  Columns: ${colList}`);
+      }
+    }
+  }
+
+  if (ctx.mappings.length > 0) {
+    sections.push("\n## Field Mappings");
+    for (const m of ctx.mappings) {
+      sections.push(`- ${m.sourceFile}.${m.sourceColumn} → ${m.targetTable}.${m.targetColumn} (${m.status}, ${Math.round(m.confidence * 100)}%)`);
+    }
+  }
+
+  if (ctx.entities.length > 0) {
+    sections.push("\n## Harmonized Tables (Parquet)");
+    for (const e of ctx.entities) {
+      const entityFields = ctx.fields.filter((f) => f.entity_id === e.id);
+      sections.push(`- ${e.entity_name}: ${e.row_count ?? "?"} rows @ ${e.parquet_path}`);
+      if (entityFields.length > 0) {
+        sections.push(`  Columns: ${entityFields.map((f) => f.field_name).join(", ")}`);
+      }
+    }
+  }
+
+  if (ctx.joins.length > 0) {
+    sections.push("\n## Detected Joins");
+    for (const j of ctx.joins) {
+      const from = ctx.entities.find((e) => e.id === j.from_entity_id);
+      const to = ctx.entities.find((e) => e.id === j.to_entity_id);
+      sections.push(`- ${from?.entity_name ?? "?"} ↔ ${to?.entity_name ?? "?"} ON ${j.join_column}`);
+    }
+  }
+
+  if (ctx.pipelineNodes.length > 0) {
+    sections.push("\n## Pipeline State");
+    for (const n of ctx.pipelineNodes) {
+      sections.push(`- [${n.node_type}] ${n.label} (${n.status})`);
+    }
+  }
+
+  if (ctx.alerts.length > 0) {
+    sections.push("\n## Active Quality Alerts");
+    for (const a of ctx.alerts) {
+      sections.push(`- [${a.severity}] ${a.summary}`);
+    }
+  }
+
+  if (mode === "pipeline") {
+    sections.push("\n## Mode: Pipeline\nYou have access to pipeline tools for profiling, cleaning, mapping, and harmonizing data.");
+  } else {
+    sections.push("\n## Mode: Conversation\nYou have access to analyst tools for querying data, generating charts, and explaining lineage. You can also access pipeline tools if the user needs to modify their pipeline.");
+  }
+
+  return sections.join("\n");
 }
 
-const SYSTEM_PROMPT = `You are CareMap AI, an intelligent assistant for healthcare data harmonization.
+function getToolsForMode(mode: AgentMode) {
+  if (mode === "pipeline") {
+    return { ...pipelineTools, ...sharedTools };
+  }
+  return allTools;
+}
 
-You help users:
-1. Profile and understand uploaded clinical datasets
-2. Map source fields to a canonical clinical data model
-3. Query and analyze harmonized data
-4. Investigate data quality issues and anomalies
+export function createAgent(_projectId: string, mode: AgentMode, systemPrompt: string) {
+  const tools = getToolsForMode(mode);
 
-You have access to these tools:
-- executeSQL: Run SQL queries against the harmonized data store
-- explainLineage: Trace any field back to its source file and mapping
-- runQualityCheck: Assess data quality for a table or source
+  return new ToolLoopAgent({
+    model: getModel(),
+    instructions: systemPrompt,
+    tools,
+    stopWhen: stepCountIs(20),
+  });
+}
 
-When answering analytical questions:
-1. First determine which tables and joins are needed
-2. Write and execute the SQL query
-3. Summarize the results in plain language
-4. Suggest a chart type if the data is suitable for visualization
+export interface AgentStreamOptions {
+  projectId: string;
+  mode: AgentMode;
+  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+}
 
-Always show your reasoning. Reference specific tables, columns, and data sources.
-Column names in source data may be in German — translate and explain.
+export async function createAgentStreamResponse(opts: AgentStreamOptions): Promise<Response> {
+  const systemPrompt = await buildSystemPrompt(opts.projectId, opts.mode);
+  const agent = createAgent(opts.projectId, opts.mode, systemPrompt);
 
-For chart suggestions, return a JSON block with:
-{ "type": "bar|line|pie", "title": "...", "xKey": "...", "yKey": "...", "data": [...] }`;
-
-export async function streamChatResponse(
-  projectId: string,
-  messages: Array<{ role: string; content: string }>,
-): Promise<ReadableStream<Uint8Array>> {
-  const semanticContext = await buildSemanticContext(projectId);
-
-  const systemMessages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
-    { role: "system", content: `Current project semantic layer:\n${semanticContext}` },
-  ];
-
-  const chatMessages: ChatMessage[] = messages.map((m) => ({
-    role: m.role === "agent" ? "assistant" : (m.role as "user" | "assistant"),
+  const uiMessages: UIMessage[] = opts.messages.map((m, i) => ({
+    id: `msg-${i}`,
+    role: m.role === "system" ? "user" : m.role,
     content: m.content,
+    parts: [{ type: "text" as const, text: m.content }],
   }));
 
-  const response = await ai.chat.completions.create({
-    model: getModelId(),
-    messages: [...systemMessages, ...chatMessages],
-    stream: true,
+  return createAgentUIStreamResponse({
+    agent,
+    uiMessages,
+  });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function createSimpleStream(opts: AgentStreamOptions): Promise<any> {
+  const systemPrompt = await buildSystemPrompt(opts.projectId, opts.mode);
+  const tools = getToolsForMode(opts.mode);
+
+  const result = streamText({
+    model: getModel(),
+    system: systemPrompt,
+    messages: opts.messages,
+    tools,
+    stopWhen: stepCountIs(20),
     temperature: 0.3,
   });
 
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      try {
-        for await (const chunk of response) {
-          const content = chunk.choices[0]?.delta?.content;
-          if (content) {
-            const sseData = `data: ${JSON.stringify({ type: "text_delta", content })}\n\n`;
-            controller.enqueue(encoder.encode(sseData));
-          }
-        }
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        controller.close();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Stream failed";
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", message })}\n\n`));
-        controller.close();
-      }
-    },
-  });
-}
-
-async function buildSemanticContext(projectId: string): Promise<string> {
-  const { data: entities } = await supabase
-    .from("semantic_entities")
-    .select("entity_name, description, sql_table_name")
-    .eq("project_id", projectId);
-
-  if (!entities?.length) {
-    return "No semantic entities defined yet. The user has not harmonized any data.";
-  }
-
-  type EntityRow = { entity_name: string; description: string | null; sql_table_name: string };
-  const lines = (entities as EntityRow[]).map(
-    (e) => `- ${e.entity_name} (table: ${e.sql_table_name}): ${e.description ?? "No description"}`,
-  );
-
-  return `Available entities:\n${lines.join("\n")}`;
-}
-
-export async function executeProjectSQL(
-  projectId: string,
-  sql: string,
-): Promise<{ rows: Record<string, unknown>[]; rowCount: number; executionTimeMs: number }> {
-  const start = Date.now();
-
-  // Validate: only SELECT queries allowed
-  const trimmed = sql.trim().toUpperCase();
-  if (!trimmed.startsWith("SELECT")) {
-    throw new AIServiceError("Only SELECT queries are allowed");
-  }
-
-  // TODO: In production, use a Supabase RPC function for sandboxed read-only queries.
-  // For the prototype, we execute directly via the Supabase client.
-  const { data, error } = await supabase.rpc("execute_readonly_sql", {
-    query_text: sql,
-    p_project_id: projectId,
-  } as Record<string, unknown>);
-
-  if (error) throw new AIServiceError(`SQL execution failed: ${error.message}`);
-
-  const rows = (data ?? []) as Record<string, unknown>[];
-  return {
-    rows,
-    rowCount: rows.length,
-    executionTimeMs: Date.now() - start,
-  };
+  return result;
 }

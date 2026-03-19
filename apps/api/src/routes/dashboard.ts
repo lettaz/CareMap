@@ -1,8 +1,16 @@
 import type { FastifyPluginAsync } from "fastify";
+import { z } from "zod";
 import { supabase } from "../config/supabase.js";
 import { getAlertsByProject, acknowledgeAlert } from "../services/quality.js";
 import { ValidationError } from "../lib/errors.js";
 import type { DashboardResponse } from "../lib/types/api.js";
+
+const pinArtifactSchema = z.object({
+  title: z.string().min(1),
+  queryText: z.string(),
+  queryCode: z.string(),
+  chartSpec: z.record(z.unknown()),
+});
 
 export const dashboardRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: { projectId: string } }>("/", async (request) => {
@@ -20,6 +28,7 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
         id: w.id,
         title: w.title,
         queryText: w.query_text,
+        queryCode: w.query_code ?? "",
         chartSpec: w.chart_spec as Record<string, unknown>,
         pinnedAt: w.pinned_at,
       })),
@@ -37,34 +46,30 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
     return response;
   });
 
-  app.post<{ Querystring: { projectId: string } }>("/widgets", async (request, reply) => {
+  app.post<{ Querystring: { projectId: string } }>("/artifacts/pin", async (request, reply) => {
     const { projectId } = request.query;
     if (!projectId) throw new ValidationError("projectId is required");
 
-    const body = request.body as {
-      title: string;
-      queryText: string;
-      sqlQuery: string;
-      chartSpec: Record<string, unknown>;
-    };
+    const parsed = pinArtifactSchema.safeParse(request.body);
+    if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid artifact");
 
     const { data, error } = await supabase
       .from("pinned_widgets")
       .insert({
         project_id: projectId,
-        title: body.title,
-        query_text: body.queryText,
-        sql_query: body.sqlQuery,
-        chart_spec: body.chartSpec,
+        title: parsed.data.title,
+        query_text: parsed.data.queryText,
+        query_code: parsed.data.queryCode,
+        chart_spec: parsed.data.chartSpec,
       })
       .select()
       .single();
 
-    if (error) throw new Error(`Failed to pin widget: ${error.message}`);
+    if (error) throw new Error(`Failed to pin artifact: ${error.message}`);
     return reply.status(201).send(data);
   });
 
-  app.delete<{ Params: { widgetId: string } }>("/widgets/:widgetId", async (request, reply) => {
+  app.delete<{ Params: { widgetId: string } }>("/artifacts/:widgetId", async (request, reply) => {
     const { widgetId } = request.params;
     await supabase.from("pinned_widgets").delete().eq("id", widgetId);
     return reply.status(204).send();
@@ -91,7 +96,7 @@ async function fetchWidgets(projectId: string) {
 async function fetchSourceSummaries(projectId: string) {
   const { data: files, error } = await supabase
     .from("source_files")
-    .select("id, filename, row_count")
+    .select("id, filename, row_count, status")
     .eq("project_id", projectId);
 
   if (error) throw new Error(`Failed to fetch sources: ${error.message}`);
@@ -113,6 +118,7 @@ async function fetchSourceSummaries(projectId: string) {
       id: file.id,
       filename: file.filename,
       rowCount: file.row_count ?? 0,
+      status: (file as Record<string, unknown>).status as string ?? "raw",
       mappedFields: acceptedMappings ?? 0,
       unmappedFields: (totalMappings ?? 0) - (acceptedMappings ?? 0),
     });

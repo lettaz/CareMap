@@ -13,11 +13,14 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
 
   LLM_PROVIDER: z.enum(["openai", "anthropic", "custom"]).default("openai"),
-  LLM_MODEL: z.string().default("gpt-4.1"),
+  LLM_MODEL: z.string().default("gpt-5.2-codex"),
 
   CUSTOM_LLM_BASE_URL: z.string().url().optional(),
   CUSTOM_LLM_API_KEY: z.string().optional(),
   CUSTOM_LLM_MODEL: z.string().optional(),
+
+  E2B_API_KEY: z.string().min(1),
+  E2B_TEMPLATE_ID: z.string().optional(),
 
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
 });

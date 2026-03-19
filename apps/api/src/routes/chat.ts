@@ -1,32 +1,50 @@
 import type { FastifyPluginAsync } from "fastify";
-import { chatRequestSchema } from "../lib/types/api.js";
-import { streamChatResponse } from "../services/agent.js";
+import { z } from "zod";
+import { createAgentStreamResponse } from "../services/agent.js";
 import { ValidationError } from "../lib/errors.js";
+
+const chatMessageSchema = z.object({
+  role: z.enum(["user", "assistant", "system"]),
+  content: z.string().min(1),
+});
+
+const chatRequestSchema = z.object({
+  messages: z.array(chatMessageSchema).min(1),
+  projectId: z.string().uuid(),
+});
 
 export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.post("/", async (request, reply) => {
     const parsed = chatRequestSchema.safeParse(request.body);
     if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid input");
 
-    const stream = await streamChatResponse(parsed.data.projectId, parsed.data.messages);
+    const { projectId, messages } = parsed.data;
 
-    reply.raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
+    const response = await createAgentStreamResponse({
+      projectId,
+      mode: "conversation",
+      messages,
     });
 
-    const reader = stream.getReader();
+    const status = response.status;
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      headers[key] = value;
+    });
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        reply.raw.write(value);
+    reply.raw.writeHead(status, headers);
+
+    if (response.body) {
+      const reader = response.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          reply.raw.write(value);
+        }
+      } catch {
+        // Client disconnected
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Stream failed";
-      reply.raw.write(`data: ${JSON.stringify({ type: "error", message })}\n\n`);
     }
 
     reply.raw.end();

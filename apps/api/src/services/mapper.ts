@@ -1,4 +1,5 @@
-import { ai, getModelId } from "../config/ai.js";
+import { getModel } from "../config/ai.js";
+import { generateText } from "ai";
 import { supabase } from "../config/supabase.js";
 import { AIServiceError, NotFoundError } from "../lib/errors.js";
 import type { FieldMappingRow, FieldMappingInsert } from "../lib/types/database.js";
@@ -49,9 +50,8 @@ export async function generateMappings(
   sourceFileId: string,
   columnProfiles: SourceColumnContext[],
 ): Promise<FieldMappingRow[]> {
-  const response = await ai.chat.completions.create({
-    model: getModelId(),
-    response_format: { type: "json_object" },
+  const { text: content } = await generateText({
+    model: getModel(),
     messages: [
       { role: "system", content: MAPPING_SYSTEM_PROMPT },
       {
@@ -62,7 +62,6 @@ export async function generateMappings(
     temperature: 0.1,
   });
 
-  const content = response.choices[0]?.message?.content;
   if (!content) throw new AIServiceError("Empty response from mapping model");
 
   const parsed = JSON.parse(content) as { mappings?: MappingResult[] } | MappingResult[];

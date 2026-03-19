@@ -86,7 +86,7 @@ create index idx_field_mappings_status on field_mappings(project_id, status);
 -- ── Pipeline State ──
 
 create table pipeline_nodes (
-  id         uuid primary key default uuid_generate_v4(),
+  id         text primary key,
   project_id uuid not null references projects(id) on delete cascade,
   node_type  text not null,
   label      text not null,
@@ -98,10 +98,10 @@ create table pipeline_nodes (
 create index idx_pipeline_nodes_project on pipeline_nodes(project_id);
 
 create table pipeline_edges (
-  id             uuid primary key default uuid_generate_v4(),
+  id             text primary key,
   project_id     uuid not null references projects(id) on delete cascade,
-  source_node_id uuid not null references pipeline_nodes(id) on delete cascade,
-  target_node_id uuid not null references pipeline_nodes(id) on delete cascade
+  source_node_id text not null references pipeline_nodes(id) on delete cascade,
+  target_node_id text not null references pipeline_nodes(id) on delete cascade
 );
 
 create index idx_pipeline_edges_project on pipeline_edges(project_id);
