@@ -18,7 +18,7 @@ export function MappingThresholds() {
         </div>
         <Slider
           value={[autoAccept * 100]}
-          onValueChange={(val: number[]) => setAutoAccept(val[0] / 100)}
+          onValueChange={(val) => setAutoAccept((Array.isArray(val) ? val[0] : val) / 100)}
           min={0}
           max={100}
           step={1}
@@ -36,7 +36,7 @@ export function MappingThresholds() {
         </div>
         <Slider
           value={[review * 100]}
-          onValueChange={(val: number[]) => setReview(val[0] / 100)}
+          onValueChange={(val) => setReview((Array.isArray(val) ? val[0] : val) / 100)}
           min={0}
           max={100}
           step={1}

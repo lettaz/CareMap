@@ -57,11 +57,9 @@ export default function SettingsPage() {
                 </p>
               </div>
               <Dialog open={clearOpen} onOpenChange={setClearOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="destructive" size="sm">
-                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                    Clear Data
-                  </Button>
+                <DialogTrigger render={<Button variant="destructive" size="sm" />}>
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  Clear Data
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>

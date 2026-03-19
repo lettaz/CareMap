@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { MessageCircle, RefreshCw, Trash2, Palette } from "lucide-react";
+import { MessageCircle, RefreshCw, Trash2 } from "lucide-react";
 
 interface NodeContextMenuProps {
   x: number;
