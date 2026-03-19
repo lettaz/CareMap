@@ -1,0 +1,12 @@
+node_modules
+apps/web
+apps/api/node_modules
+apps/api/dist
+apps/api/.env
+apps/api/e2b
+data
+docs
+.cursor
+.agents
+.git
+*.md
