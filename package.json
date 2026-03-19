@@ -1,0 +1,5 @@
+{
+  "name": "caremap",
+  "private": true,
+  "workspaces": ["apps/*"]
+}

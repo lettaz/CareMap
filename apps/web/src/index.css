@@ -1,0 +1,194 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource-variable/geist-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* --- CareMap Design Tokens --- */
+
+  --cm-bg-app: #F8FAFC;
+  --cm-bg-surface: #FFFFFF;
+  --cm-bg-elevated: #F1F5F9;
+  --cm-bg-hover: #E2E8F0;
+  --cm-bg-canvas: #FAFBFC;
+
+  --cm-border-primary: #E2E8F0;
+  --cm-border-subtle: #F1F5F9;
+  --cm-border-strong: #CBD5E1;
+
+  --cm-text-primary: #0F172A;
+  --cm-text-secondary: #475569;
+  --cm-text-tertiary: #94A3B8;
+
+  --cm-accent: #4F46E5;
+  --cm-accent-hover: #4338CA;
+  --cm-accent-subtle: #EEF2FF;
+  --cm-accent-muted: #C7D2FE;
+
+  --cm-success: #059669;
+  --cm-success-subtle: #ECFDF5;
+  --cm-warning: #D97706;
+  --cm-warning-subtle: #FFFBEB;
+  --cm-error: #DC2626;
+  --cm-error-subtle: #FEF2F2;
+  --cm-info: #2563EB;
+  --cm-info-subtle: #EFF6FF;
+
+  --cm-node-source: #3B82F6;
+  --cm-node-source-subtle: #EFF6FF;
+  --cm-node-transform: #059669;
+  --cm-node-transform-subtle: #ECFDF5;
+  --cm-node-quality: #D97706;
+  --cm-node-quality-subtle: #FFFBEB;
+  --cm-node-sink: #6366F1;
+  --cm-node-sink-subtle: #EEF2FF;
+
+  --cm-agent-builder: #059669;
+  --cm-agent-builder-subtle: #ECFDF5;
+  --cm-agent-analyst: #3B82F6;
+  --cm-agent-analyst-subtle: #EFF6FF;
+
+  --cm-shadow-surface: 0 1px 2px rgba(0,0,0,0.05);
+  --cm-shadow-elevated: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --cm-shadow-modal: 0 4px 16px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.06);
+
+  /* --- shadcn/ui variable overrides --- */
+  --background: var(--cm-bg-app);
+  --foreground: var(--cm-text-primary);
+  --card: var(--cm-bg-surface);
+  --card-foreground: var(--cm-text-primary);
+  --popover: var(--cm-bg-surface);
+  --popover-foreground: var(--cm-text-primary);
+  --primary: var(--cm-accent);
+  --primary-foreground: #FFFFFF;
+  --secondary: var(--cm-bg-elevated);
+  --secondary-foreground: var(--cm-text-primary);
+  --muted: var(--cm-bg-elevated);
+  --muted-foreground: var(--cm-text-secondary);
+  --accent: var(--cm-accent-subtle);
+  --accent-foreground: var(--cm-accent);
+  --destructive: var(--cm-error);
+  --border: var(--cm-border-primary);
+  --input: var(--cm-border-primary);
+  --ring: var(--cm-accent);
+  --chart-1: var(--cm-accent);
+  --chart-2: var(--cm-node-source);
+  --chart-3: var(--cm-success);
+  --chart-4: var(--cm-warning);
+  --chart-5: var(--cm-error);
+  --radius: 0.5rem;
+  --sidebar: var(--cm-bg-surface);
+  --sidebar-foreground: var(--cm-text-primary);
+  --sidebar-primary: var(--cm-accent);
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: var(--cm-bg-elevated);
+  --sidebar-accent-foreground: var(--cm-text-primary);
+  --sidebar-border: var(--cm-border-primary);
+  --sidebar-ring: var(--cm-accent);
+}
+
+@theme inline {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 1.25);
+  --radius-xl: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 2);
+
+  /* CareMap custom colours for Tailwind classes */
+  --color-cm-bg-app: var(--cm-bg-app);
+  --color-cm-bg-surface: var(--cm-bg-surface);
+  --color-cm-bg-elevated: var(--cm-bg-elevated);
+  --color-cm-bg-hover: var(--cm-bg-hover);
+  --color-cm-bg-canvas: var(--cm-bg-canvas);
+  --color-cm-border-primary: var(--cm-border-primary);
+  --color-cm-border-subtle: var(--cm-border-subtle);
+  --color-cm-border-strong: var(--cm-border-strong);
+  --color-cm-text-primary: var(--cm-text-primary);
+  --color-cm-text-secondary: var(--cm-text-secondary);
+  --color-cm-text-tertiary: var(--cm-text-tertiary);
+  --color-cm-accent: var(--cm-accent);
+  --color-cm-accent-hover: var(--cm-accent-hover);
+  --color-cm-accent-subtle: var(--cm-accent-subtle);
+  --color-cm-accent-muted: var(--cm-accent-muted);
+  --color-cm-success: var(--cm-success);
+  --color-cm-success-subtle: var(--cm-success-subtle);
+  --color-cm-warning: var(--cm-warning);
+  --color-cm-warning-subtle: var(--cm-warning-subtle);
+  --color-cm-error: var(--cm-error);
+  --color-cm-error-subtle: var(--cm-error-subtle);
+  --color-cm-info: var(--cm-info);
+  --color-cm-info-subtle: var(--cm-info-subtle);
+  --color-cm-node-source: var(--cm-node-source);
+  --color-cm-node-source-subtle: var(--cm-node-source-subtle);
+  --color-cm-node-transform: var(--cm-node-transform);
+  --color-cm-node-transform-subtle: var(--cm-node-transform-subtle);
+  --color-cm-node-quality: var(--cm-node-quality);
+  --color-cm-node-quality-subtle: var(--cm-node-quality-subtle);
+  --color-cm-node-sink: var(--cm-node-sink);
+  --color-cm-node-sink-subtle: var(--cm-node-sink-subtle);
+  --color-cm-agent-builder: var(--cm-agent-builder);
+  --color-cm-agent-builder-subtle: var(--cm-agent-builder-subtle);
+  --color-cm-agent-analyst: var(--cm-agent-analyst);
+  --color-cm-agent-analyst-subtle: var(--cm-agent-analyst-subtle);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+.react-flow__background {
+  background-color: var(--cm-bg-canvas) !important;
+}
+
+.react-flow__minimap {
+  background-color: var(--cm-bg-surface) !important;
+  border: 1px solid var(--cm-border-primary) !important;
+  border-radius: 8px !important;
+}
