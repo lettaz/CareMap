@@ -54,6 +54,8 @@ async function resolveStoragePaths(
 
 function buildSqlQueryCode(sql: string): string {
   return `
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "duckdb"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 import duckdb
 import json
 import os

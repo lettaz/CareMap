@@ -1,4 +1,4 @@
-import { streamText, ToolLoopAgent, stepCountIs, createAgentUIStreamResponse } from "ai";
+import { ToolLoopAgent, stepCountIs, createAgentUIStreamResponse } from "ai";
 import type { UIMessage } from "ai";
 import { getModel } from "../config/ai.js";
 import { allTools } from "./tools/index.js";
@@ -158,18 +158,4 @@ export async function createAgentStreamResponse(opts: AgentStreamOptions): Promi
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function createSimpleStream(opts: AgentStreamOptions): Promise<any> {
-  const systemPrompt = await buildSystemPrompt(opts.projectId);
-
-  const result = streamText({
-    model: getModel(),
-    system: systemPrompt,
-    messages: opts.messages,
-    tools: allTools,
-    stopWhen: stepCountIs(20),
-    temperature: 0.3,
-  });
-
-  return result;
-}
+export { buildSystemPrompt };

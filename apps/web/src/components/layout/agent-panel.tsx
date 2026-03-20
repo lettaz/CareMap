@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo, type ReactNode } from "react";
+import { useParams } from "react-router-dom";
 import {
   Sparkles,
   Square,
@@ -6,12 +7,19 @@ import {
   FileSpreadsheet,
   Paperclip,
   ChevronDown,
+  ChevronRight,
+  X,
+  Database,
+  GitMerge,
+  ShieldCheck,
+  HardDriveDownload,
+  Trash2,
 } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import { useAgentStore } from "@/lib/stores/agent-store";
-import { useActiveProject } from "@/hooks/use-active-project";
+import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { apiUrl } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +38,7 @@ import {
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { ToolResultRenderer } from "@/components/agent/tool-result-renderer";
 import { cn } from "@/lib/utils";
+import type { NodeCategory } from "@/lib/types";
 
 const DESTRUCTIVE_TOOLS = new Set([
   "execute_cleaning",
@@ -69,48 +78,183 @@ const MODEL_OPTIONS = [
   { value: "claude-sonnet", label: "Claude Sonnet" },
 ] as const;
 
+interface MentionChip {
+  label: string;
+  id: string;
+  sourceFileId?: string;
+  category: NodeCategory;
+}
+
+const CATEGORY_ICONS: Record<NodeCategory, typeof Database> = {
+  source: Database,
+  transform: GitMerge,
+  quality: ShieldCheck,
+  sink: HardDriveDownload,
+};
+
+const CATEGORY_COLORS: Record<NodeCategory, string> = {
+  source: "bg-blue-50 text-blue-700",
+  transform: "bg-violet-50 text-violet-700",
+  quality: "bg-amber-50 text-amber-700",
+  sink: "bg-emerald-50 text-emerald-700",
+};
+
+function chatStorageKey(projectId: string) {
+  return `caremap-chat:${projectId}`;
+}
+
+function loadPersistedMessages(projectId: string | undefined): UIMessage[] {
+  if (!projectId) return [];
+  try {
+    const raw = localStorage.getItem(chatStorageKey(projectId));
+    if (!raw) return [];
+    return JSON.parse(raw) as UIMessage[];
+  } catch {
+    return [];
+  }
+}
+
+function persistMessages(projectId: string | undefined, messages: UIMessage[]) {
+  if (!projectId) return;
+  try {
+    if (messages.length === 0) {
+      localStorage.removeItem(chatStorageKey(projectId));
+    } else {
+      localStorage.setItem(chatStorageKey(projectId), JSON.stringify(messages));
+    }
+  } catch { /* quota exceeded — silent */ }
+}
+
 export function AgentPanel() {
-  const { projectId } = useActiveProject();
+  const { projectId } = useParams<{ projectId: string }>();
   const nodeContext = useAgentStore((s) => s.nodeContext);
   const setNodeContext = useAgentStore((s) => s.setNodeContext);
+  const pipelineNodes = usePipelineStore((s) =>
+    projectId ? s.pipelines[projectId]?.nodes ?? [] : [],
+  );
+
   const [draft, setDraft] = useState("");
+  const [mentions, setMentions] = useState<MentionChip[]>([]);
   const [model, setModel] = useState("auto");
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const [mentionTriggerPos, setMentionTriggerPos] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mentionListRef = useRef<HTMLDivElement>(null);
+
+  const initialMessages = useMemo(() => loadPersistedMessages(projectId), [projectId]);
+
+  const filteredNodes = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    const alreadyMentioned = new Set(mentions.map((m) => m.id));
+    return pipelineNodes
+      .filter((n) => !alreadyMentioned.has(n.id) && n.data.label.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [mentionQuery, pipelineNodes, mentions]);
+
+  const transport = useMemo(
+    () => new DefaultChatTransport({
+      api: apiUrl("/api/chat"),
+      body: { projectId: projectId ?? "" },
+    }),
+    [projectId],
+  );
 
   const chat = useChat({
-    transport: new DefaultChatTransport({
-      api: apiUrl("/api/chat"),
-      body: { projectId, model: model === "auto" ? undefined : model },
-    }),
+    transport,
+    messages: initialMessages,
     onError: (error) => {
       console.error("Chat error:", error);
     },
   });
 
-  const { messages, sendMessage, status, stop, addToolApprovalResponse } = chat;
+  const { messages, sendMessage, status, error, stop, setMessages, addToolApprovalResponse } = chat;
+
+  useEffect(() => {
+    if (status === "ready") {
+      persistMessages(projectId, messages);
+    }
+  }, [messages, status, projectId]);
+
+  const clearChat = useCallback(() => {
+    setMessages([]);
+    persistMessages(projectId, []);
+  }, [setMessages, projectId]);
 
   useEffect(() => {
     if (!nodeContext || !projectId) return;
     const filename = nodeContext.filename ?? nodeContext.label;
     const sfId = nodeContext.sourceFileId ?? "";
-    const text = sfId
-      ? `Profile @[src ${filename}](${sfId}) and suggest mappings`
-      : `Tell me about "${nodeContext.label}"`;
+    const matchedNode = pipelineNodes.find((n) => n.data.sourceFileId === sfId);
+    const nodeId = matchedNode?.id ?? nodeContext.nodeId;
+    const category = matchedNode?.data.category ?? "source";
 
-    queueMicrotask(() => {
-      setDraft(text);
-      textareaRef.current?.focus();
-    });
+    if (sfId) {
+      queueMicrotask(() => {
+        setMentions((prev) => {
+          if (prev.some((m) => m.id === nodeId)) return prev;
+          return [...prev, { label: filename, id: nodeId, sourceFileId: sfId, category }];
+        });
+        setDraft("Profile and suggest mappings");
+        textareaRef.current?.focus();
+      });
+    } else {
+      queueMicrotask(() => {
+        setDraft(`Tell me about "${nodeContext.label}"`);
+        textareaRef.current?.focus();
+      });
+    }
     setNodeContext(null);
-  }, [nodeContext, projectId, setNodeContext]);
+  }, [nodeContext, projectId, setNodeContext, pipelineNodes]);
+
+  const insertMention = useCallback(
+    (node: { id: string; data: { label: string; category: NodeCategory; sourceFileId?: string } }) => {
+      setMentions((prev) => {
+        if (prev.some((m) => m.id === node.id)) return prev;
+        return [...prev, {
+          label: node.data.label,
+          id: node.id,
+          sourceFileId: node.data.sourceFileId as string | undefined,
+          category: node.data.category,
+        }];
+      });
+
+      if (mentionTriggerPos !== null) {
+        const before = draft.slice(0, mentionTriggerPos);
+        const afterAt = draft.slice(mentionTriggerPos);
+        const spaceIdx = afterAt.search(/\s/);
+        const after = spaceIdx === -1 ? "" : afterAt.slice(spaceIdx);
+        setDraft(before + after.trimStart());
+      }
+
+      setMentionQuery(null);
+      setMentionTriggerPos(null);
+      setMentionIdx(0);
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    },
+    [draft, mentionTriggerPos],
+  );
+
+  const removeMention = useCallback((id: string) => {
+    setMentions((prev) => prev.filter((m) => m.id !== id));
+  }, []);
 
   const handleSend = useCallback(() => {
-    if (!draft.trim()) return;
-    sendMessage({ text: draft.trim() });
+    if (!projectId) return;
+    if (!draft.trim() && mentions.length === 0) return;
+    const mentionParts = mentions
+      .map((m) => `@[${m.label}](${m.sourceFileId ?? m.id})`)
+      .join(" ");
+    const text = mentionParts ? `${mentionParts} ${draft.trim()}` : draft.trim();
+    sendMessage({ text });
     setDraft("");
-  }, [draft, sendMessage]);
+    setMentions([]);
+    setMentionQuery(null);
+    setMentionTriggerPos(null);
+  }, [draft, mentions, sendMessage, projectId]);
 
   const handleSuggestionClick = useCallback(
     (suggestion: string) => {
@@ -120,39 +264,217 @@ export function AgentPanel() {
     [],
   );
 
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, []);
+
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = e.target.value;
+      const cursor = e.target.selectionStart ?? value.length;
+      setDraft(value);
+
+      const textBeforeCursor = value.slice(0, cursor);
+      const atMatch = textBeforeCursor.match(/@(\w*)$/);
+
+      if (atMatch) {
+        setMentionQuery(atMatch[1]);
+        setMentionTriggerPos(textBeforeCursor.length - atMatch[0].length);
+        setMentionIdx(0);
+      } else {
+        setMentionQuery(null);
+        setMentionTriggerPos(null);
+      }
+
+      autoResize();
+    },
+    [autoResize],
+  );
+
+  useEffect(() => {
+    autoResize();
+  }, [draft, autoResize]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (mentionQuery !== null && filteredNodes.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setMentionIdx((i) => Math.min(i + 1, filteredNodes.length - 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setMentionIdx((i) => Math.max(i - 1, 0));
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          insertMention(filteredNodes[mentionIdx]);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setMentionQuery(null);
+          setMentionTriggerPos(null);
+          return;
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
+
+      if (e.key === "Backspace" && draft === "" && mentions.length > 0) {
+        e.preventDefault();
+        setMentions((prev) => prev.slice(0, -1));
+      }
     },
-    [handleSend],
+    [handleSend, mentionQuery, filteredNodes, mentionIdx, insertMention, draft, mentions],
   );
 
   const isStreaming = status === "streaming" || status === "submitted";
   const hasMessages = messages.length > 0;
   const selectedModel = MODEL_OPTIONS.find((m) => m.value === model) ?? MODEL_OPTIONS[0];
+  const showMentionMenu = mentionQuery !== null && filteredNodes.length > 0;
 
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden bg-cm-bg-app">
-      {/* Input area — top, no divider */}
-      <div className="shrink-0 px-3 pt-3 pb-2 space-y-2">
-        <div className="relative flex items-end rounded-xl border border-cm-border-primary bg-cm-bg-surface shadow-sm">
+      {hasMessages && (
+        <div className="flex items-center justify-between shrink-0 px-3 pt-2.5 pb-1">
+          <span className="text-[11px] font-medium text-cm-text-tertiary">CareMap AI</span>
+          <button
+            type="button"
+            onClick={clearChat}
+            disabled={isStreaming}
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary transition-colors disabled:opacity-40"
+          >
+            <Trash2 className="h-3 w-3" />
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Messages or empty state */}
+      {hasMessages ? (
+        <Conversation className="flex-1">
+          <ConversationContent className="gap-4 p-3">
+            {messages.map((msg) => (
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                onApprove={(id) => addToolApprovalResponse({ id, approved: true })}
+                onReject={(id) => addToolApprovalResponse({ id, approved: false })}
+              />
+            ))}
+            {isStreaming && (
+              <div className="flex items-center gap-2 px-1">
+                <Shimmer duration={1.5}>Thinking...</Shimmer>
+              </div>
+            )}
+
+            {status === "error" && error && (
+              <div className="mx-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <p className="font-medium">Something went wrong</p>
+                <p className="mt-0.5 text-red-600">{error.message}</p>
+              </div>
+            )}
+
+            {!isStreaming && (
+              <Suggestions className="pt-1">
+                {SUGGESTIONS.map((s) => (
+                  <Suggestion key={s} suggestion={s} onClick={handleSuggestionClick} className="text-xs" />
+                ))}
+              </Suggestions>
+            )}
+          </ConversationContent>
+        </Conversation>
+      ) : (
+        <AgentEmptyState onSuggestionClick={handleSuggestionClick} />
+      )}
+
+      {/* Input area — bottom, no divider */}
+      <div className="shrink-0 px-3 pt-2 pb-3">
+        <div className="relative flex flex-col rounded-xl border border-cm-border-primary bg-cm-bg-surface shadow-sm">
+          {mentions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5 pb-0">
+              {mentions.map((m) => {
+                const Icon = CATEGORY_ICONS[m.category] ?? Database;
+                const colorClass = CATEGORY_COLORS[m.category] ?? CATEGORY_COLORS.source;
+                return (
+                  <span
+                    key={m.id}
+                    className={cn("inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium", colorClass)}
+                  >
+                    <Icon className="h-3 w-3" />
+                    {m.label}
+                    <button
+                      type="button"
+                      onClick={() => removeMention(m.id)}
+                      className="ml-0.5 rounded-sm opacity-60 hover:opacity-100 transition-opacity"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder="Ask anything about your data..."
+            placeholder={mentions.length > 0 ? "Type your question..." : "Ask anything about your data... (@ to mention a node)"}
             rows={1}
-            className="w-full resize-none bg-transparent px-3 pt-3 pb-9 pr-10 text-sm text-cm-text-primary placeholder:text-cm-text-tertiary outline-none"
+            className="w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm text-cm-text-primary placeholder:text-cm-text-tertiary outline-none"
+            style={{ maxHeight: 160 }}
           />
 
-          {/* Bottom toolbar inside the input box */}
-          <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between">
+          {/* @ mention autocomplete */}
+          {showMentionMenu && (
+            <div
+              ref={mentionListRef}
+              className="absolute bottom-full left-0 right-0 z-50 mb-1 mx-1 max-h-52 overflow-y-auto rounded-lg border border-cm-border-primary bg-cm-bg-surface py-1 shadow-lg"
+            >
+              <p className="px-3 py-1 text-[10px] font-medium text-cm-text-tertiary uppercase tracking-wide">
+                Pipeline nodes
+              </p>
+              {filteredNodes.map((node, i) => {
+                const Icon = CATEGORY_ICONS[node.data.category] ?? Database;
+                const subtitle = node.data.sourceFileId
+                  ? String(node.data.sourceFileId).slice(0, 8)
+                  : node.id.slice(0, 8);
+                return (
+                  <button
+                    key={node.id}
+                    type="button"
+                    onClick={() => insertMention(node)}
+                    className={cn(
+                      "flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors",
+                      i === mentionIdx
+                        ? "bg-cm-accent-subtle text-cm-accent"
+                        : "text-cm-text-secondary hover:bg-cm-bg-hover"
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <span className="block truncate font-medium">{node.data.label}</span>
+                      <span className="block truncate text-[10px] text-cm-text-tertiary">{subtitle}</span>
+                    </div>
+                    <span className="text-[10px] text-cm-text-tertiary capitalize shrink-0">{node.data.category}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between px-1.5 pb-1.5">
             <div className="flex items-center gap-1">
-              {/* Attach docs */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -169,7 +491,6 @@ export function AgentPanel() {
                 <Paperclip className="h-3.5 w-3.5" />
               </button>
 
-              {/* Model selector */}
               <div className="relative">
                 <button
                   type="button"
@@ -204,7 +525,6 @@ export function AgentPanel() {
               </div>
             </div>
 
-            {/* Send / Stop */}
             {isStreaming ? (
               <Button variant="ghost" size="icon" onClick={stop} className="h-7 w-7">
                 <Square className="h-3.5 w-3.5" />
@@ -213,7 +533,7 @@ export function AgentPanel() {
               <Button
                 size="icon"
                 onClick={handleSend}
-                disabled={!draft.trim()}
+                disabled={!draft.trim() && mentions.length === 0}
                 className="h-7 w-7 rounded-lg bg-cm-accent text-white hover:bg-cm-accent-hover disabled:opacity-40"
               >
                 <SendHorizonal className="h-3.5 w-3.5" />
@@ -222,37 +542,6 @@ export function AgentPanel() {
           </div>
         </div>
       </div>
-
-      {/* Messages or empty state */}
-      {hasMessages ? (
-        <Conversation className="flex-1">
-          <ConversationContent className="gap-4 p-3">
-            {messages.map((msg) => (
-              <ChatMessage
-                key={msg.id}
-                message={msg}
-                onApprove={(id) => addToolApprovalResponse({ id, approved: true })}
-                onReject={(id) => addToolApprovalResponse({ id, approved: false })}
-              />
-            ))}
-            {isStreaming && (
-              <div className="flex items-center gap-2 px-1">
-                <Shimmer duration={1.5}>Thinking...</Shimmer>
-              </div>
-            )}
-
-            {!isStreaming && (
-              <Suggestions className="pt-1">
-                {SUGGESTIONS.map((s) => (
-                  <Suggestion key={s} suggestion={s} onClick={handleSuggestionClick} className="text-xs" />
-                ))}
-              </Suggestions>
-            )}
-          </ConversationContent>
-        </Conversation>
-      ) : (
-        <AgentEmptyState onSuggestionClick={handleSuggestionClick} />
-      )}
     </aside>
   );
 }
@@ -287,6 +576,39 @@ function renderMentions(text: string): ReactNode {
 
   if (lastIndex < text.length) parts.push(text.slice(lastIndex));
   return parts.length > 0 ? parts : text;
+}
+
+function CollapsibleToolResult({
+  label,
+  toolName,
+  output,
+  defaultOpen,
+}: {
+  label: string;
+  toolName: string;
+  output: unknown;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="rounded-lg border border-cm-border-primary overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs font-medium text-cm-text-secondary hover:bg-cm-bg-hover transition-colors"
+      >
+        <div className="h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
+        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <span className="truncate">{label}</span>
+      </button>
+      {open && (
+        <div className="border-t border-cm-border-subtle">
+          <ToolResultRenderer toolName={toolName} output={output} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
@@ -356,8 +678,15 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
           }
 
           if (toolPart.state === "output-available" && toolPart.output != null) {
+            const expandByDefault = toolName === "generate_artifact";
             return (
-              <ToolResultRenderer key={i} toolName={toolName} output={toolPart.output} />
+              <CollapsibleToolResult
+                key={i}
+                label={label}
+                toolName={toolName}
+                output={toolPart.output}
+                defaultOpen={expandByDefault}
+              />
             );
           }
 

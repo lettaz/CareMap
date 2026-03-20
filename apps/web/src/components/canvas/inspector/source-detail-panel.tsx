@@ -95,20 +95,30 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
 
       updateNodeData(projectId, nodeId, { label: file.name, status: "running" });
 
+      let capturedSourceFileId = "";
+      let capturedRowCount = 0;
+      let capturedColumnCount = 0;
+
       uploadWithSSE(
         "/api/ingest",
         file,
         { projectId, nodeId },
         {
-          onEvent: (type, data) => {
+          onEvent: (_evtType, data) => {
             const d = data as Record<string, unknown>;
+            const type = (d.type as string) ?? _evtType;
+            const inner = (d.data as Record<string, unknown>) ?? d;
+
             switch (type) {
               case "step": {
-                const stepName = d.step as string;
-                const stepStatus = d.status as string;
+                const stepName = (inner.stepType ?? inner.step) as string;
+                const stepStatus = inner.status as string;
                 setSteps((prev) =>
                   prev.map((s) => {
                     if (stepName.includes("parse") && s.label.includes("Parsing")) {
+                      return { ...s, status: stepStatus === "completed" ? "completed" : "running" };
+                    }
+                    if (stepName.includes("save") && s.label.includes("AI")) {
                       return { ...s, status: stepStatus === "completed" ? "completed" : "running" };
                     }
                     if (stepName.includes("stats") && s.label.includes("statistics")) {
@@ -123,6 +133,13 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                 break;
               }
               case "parse_complete": {
+                const parsedSfId = inner.sourceFileId as string | undefined;
+                const parsedRowCount = inner.rowCount as number | undefined;
+                const parsedColCount = (inner.columns as string[] | undefined)?.length;
+                if (parsedSfId) capturedSourceFileId = parsedSfId;
+                if (parsedRowCount) capturedRowCount = parsedRowCount;
+                if (parsedColCount) capturedColumnCount = parsedColCount;
+
                 setSteps((prev) =>
                   prev.map((s) =>
                     s.label.includes("Uploading") ? { ...s, status: "completed" }
@@ -133,30 +150,36 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                 break;
               }
               case "profile_complete": {
-                const sourceFileId = d.sourceFileId as string;
-                const rowCount = d.rowCount as number | undefined;
-                const columnCount = d.columnCount as number | undefined;
+                const sfId = capturedSourceFileId;
+                if (!sfId) break;
 
                 setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" as const })));
 
+                const suggestedLabel = (inner.suggestedLabel as string) ?? file.name.replace(/\.[^.]+$/, "");
+
                 updateNodeData(projectId, nodeId, {
                   status: "ready",
-                  rowCount: rowCount ?? (d.totalRows as number),
-                  columnCount: columnCount ?? (d.totalColumns as number),
-                  sourceFileId,
-                  label: file.name.replace(/\.[^.]+$/, ""),
+                  rowCount: capturedRowCount,
+                  columnCount: capturedColumnCount,
+                  sourceFileId: sfId,
+                  label: suggestedLabel,
                 });
 
-                fetchDetailedProfile(sourceFileId)
+                fetchDetailedProfile(sfId)
                   .then((p) => {
                     setProfile(p);
                     setPhase("preview");
                   })
                   .catch(() => setPhase("preview"));
+
+                fetchSampleRows(sfId, { page: 1, pageSize: 20 })
+                  .then((res) => setSampleRows(res.data))
+                  .catch(() => {});
                 break;
               }
               case "error": {
-                setError(d.message as string ?? "Upload failed");
+                const msg = (inner.message as string) ?? "Upload failed";
+                setError(msg);
                 setPhase("upload");
                 updateNodeData(projectId, nodeId, { status: "error" });
                 break;

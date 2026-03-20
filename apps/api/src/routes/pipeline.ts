@@ -4,6 +4,7 @@ import { createAgentStreamResponse } from "../services/agent.js";
 import { supabase } from "../config/supabase.js";
 import { listHarmonizedTables } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
+import { env } from "../config/env.js";
 
 const triggerSchema = z.object({
   nodeId: z.string(),
@@ -197,7 +198,10 @@ export const pipelineRoutes: FastifyPluginAsync = async (app) => {
     });
 
     const status = response.status;
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      "Access-Control-Allow-Origin": env.CORS_ORIGIN,
+      "Access-Control-Allow-Credentials": "true",
+    };
     response.headers.forEach((value, key) => {
       headers[key] = value;
     });

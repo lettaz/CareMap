@@ -17,13 +17,13 @@ export async function apiFetch<T>(
   init?: RequestInit,
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
+
+  const headers: Record<string, string> = { ...init?.headers as Record<string, string> };
+  if (init?.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const res = await fetch(url, { ...init, headers });
 
   if (res.status === 204) return undefined as T;
 

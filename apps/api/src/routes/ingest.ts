@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { supabase } from "../config/supabase.js";
 import { parseCsv, parseExcel, profileColumns, saveProfiles } from "../services/profiler.js";
-import { uploadFile, rawPath, downloadFile } from "../services/storage.js";
+import { uploadFile, rawPath, downloadFile, deleteFiles, cleanedPath } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
 import { logStep } from "../lib/step-logger.js";
+import { env } from "../config/env.js";
 
 function sseWrite(raw: { write: (chunk: string) => boolean }, type: string, data: unknown) {
   raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
@@ -36,6 +37,8 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      "Access-Control-Allow-Origin": env.CORS_ORIGIN,
+      "Access-Control-Allow-Credentials": "true",
     });
 
     // ── Step 1: Parse file ──
@@ -288,6 +291,33 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
 
       if (error) throw new Error(`Failed to update profile: ${error.message}`);
       return data;
+    },
+  );
+
+  // ── Delete a source file and its storage/profiles ──
+  app.delete<{ Params: { sourceFileId: string } }>(
+    "/:sourceFileId",
+    async (request, reply) => {
+      const { sourceFileId } = request.params;
+
+      const { data: file, error: fetchErr } = await supabase
+        .from("source_files")
+        .select("id, project_id, storage_path, cleaned_path")
+        .eq("id", sourceFileId)
+        .single();
+
+      if (fetchErr || !file) return reply.status(404).send({ error: "NOT_FOUND", message: "Source file not found" });
+
+      const storagePaths = [file.storage_path, file.cleaned_path].filter(Boolean) as string[];
+      if (storagePaths.length > 0) {
+        try { await deleteFiles(storagePaths); } catch { /* best-effort */ }
+      }
+
+      await supabase.from("source_profiles").delete().eq("source_file_id", sourceFileId);
+      await supabase.from("field_mappings").delete().eq("source_file_id", sourceFileId);
+      await supabase.from("source_files").delete().eq("id", sourceFileId);
+
+      return reply.status(204).send();
     },
   );
 };

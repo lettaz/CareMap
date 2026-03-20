@@ -4,6 +4,7 @@ import Papa from "papaparse";
 import { harmonize } from "../services/harmonizer.js";
 import { downloadFile, manifestPath, harmonizedTablePath } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
+import { env } from "../config/env.js";
 
 const harmonizeBodySchema = z.object({
   projectId: z.string().uuid(),
@@ -19,6 +20,8 @@ export const harmonizeRoutes: FastifyPluginAsync = async (app) => {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      "Access-Control-Allow-Origin": env.CORS_ORIGIN,
+      "Access-Control-Allow-Credentials": "true",
     });
 
     try {

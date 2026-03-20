@@ -1,7 +1,20 @@
-import { Download, Table2, BarChart3, CheckCircle2, XCircle } from "lucide-react";
+import { useState } from "react";
+import { useParams } from "react-router-dom";
+import { Download, Table2, BarChart3, CheckCircle2, XCircle, Pin, Check } from "lucide-react";
+import {
+  BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
+  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from "recharts";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/ai-elements/code-block";
+import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { cn } from "@/lib/utils";
+
+const CHART_COLORS = [
+  "#6366f1", "#06b6d4", "#f59e0b", "#10b981", "#ef4444",
+  "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#3b82f6",
+];
 
 interface ToolResultRendererProps {
   toolName: string;
@@ -27,6 +40,8 @@ export function ToolResultRenderer({ toolName, output }: ToolResultRendererProps
       return <ScriptResult data={data} />;
     case "profile_columns":
       return <ProfileResult data={data} />;
+    case "generate_artifact":
+      return <ArtifactResult data={data} />;
     default:
       return <GenericResult data={data} />;
   }
@@ -197,30 +212,248 @@ function ScriptResult({ data }: { data: Record<string, unknown> }) {
 }
 
 function ProfileResult({ data }: { data: Record<string, unknown> }) {
-  const profiles = data.profiles as Array<{
+  const columns = (data.columns ?? data.profiles) as Array<{
     columnName: string;
     inferredType: string;
     semanticLabel: string;
     confidence: number;
+    qualityFlags?: string[];
   }> | undefined;
 
-  if (!profiles?.length) return <GenericResult data={data} />;
+  if (!columns?.length) return <GenericResult data={data} />;
+
+  const summary = data.summary as { suggestedLabel?: string; overallQuality?: string } | undefined;
+  const qualityColor = summary?.overallQuality === "good"
+    ? "bg-green-50 text-green-700"
+    : summary?.overallQuality === "fair"
+      ? "bg-amber-50 text-amber-700"
+      : "bg-red-50 text-red-700";
 
   return (
-    <div className="space-y-1 rounded-lg border border-cm-border-primary bg-cm-bg-surface p-3">
-      <p className="text-xs font-medium text-cm-text-secondary mb-2 flex items-center gap-1.5">
-        <BarChart3 className="h-3.5 w-3.5" /> Column Profiles
-      </p>
-      {profiles.slice(0, 10).map((p) => (
-        <div key={p.columnName} className="flex items-center gap-2 text-xs">
-          <span className="font-mono text-cm-text-primary min-w-[100px]">{p.columnName}</span>
-          <span className="rounded bg-cm-bg-elevated px-1.5 py-0.5 text-cm-text-tertiary">{p.inferredType}</span>
-          <span className="text-cm-text-secondary flex-1 truncate">{p.semanticLabel}</span>
-          <span className="tabular-nums text-cm-text-tertiary">{Math.round(p.confidence * 100)}%</span>
+    <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-cm-border-subtle bg-cm-bg-elevated">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-cm-text-primary">
+          <BarChart3 className="h-3.5 w-3.5 text-cm-accent" />
+          {summary?.suggestedLabel ?? `${columns.length} columns profiled`}
         </div>
-      ))}
+        {summary?.overallQuality && (
+          <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium capitalize", qualityColor)}>
+            {summary.overallQuality}
+          </span>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-cm-border-subtle bg-cm-bg-elevated/50">
+              <th className="px-3 py-1.5 text-left font-medium text-cm-text-tertiary">Column</th>
+              <th className="px-3 py-1.5 text-left font-medium text-cm-text-tertiary">Type</th>
+              <th className="px-3 py-1.5 text-left font-medium text-cm-text-tertiary">Label</th>
+              <th className="px-3 py-1.5 text-right font-medium text-cm-text-tertiary">Conf.</th>
+              <th className="px-3 py-1.5 text-left font-medium text-cm-text-tertiary">Flags</th>
+            </tr>
+          </thead>
+          <tbody>
+            {columns.map((col) => (
+              <tr key={col.columnName} className="border-b border-cm-border-subtle last:border-b-0">
+                <td className="px-3 py-1.5 font-mono text-cm-text-primary whitespace-nowrap">{col.columnName}</td>
+                <td className="px-3 py-1.5">
+                  <span className="rounded bg-cm-bg-elevated px-1.5 py-0.5 text-cm-text-tertiary">{col.inferredType}</span>
+                </td>
+                <td className="px-3 py-1.5 text-cm-text-secondary">{col.semanticLabel}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-cm-text-tertiary">{Math.round(col.confidence * 100)}%</td>
+                <td className="px-3 py-1.5">
+                  {col.qualityFlags && col.qualityFlags.length > 0 ? (
+                    <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
+                      {col.qualityFlags.map((f) => f.replace(/_/g, " ")).join(", ")}
+                    </span>
+                  ) : (
+                    <span className="text-cm-text-tertiary">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
+}
+
+interface ChartSpec {
+  chartType: "bar" | "line" | "pie" | "scatter" | "area";
+  title: string;
+  xKey: string;
+  yKey: string;
+  data: Record<string, unknown>[];
+  description?: string;
+}
+
+function ArtifactResult({ data }: { data: Record<string, unknown> }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  const pinWidget = useDashboardStore((s) => s.pinWidget);
+  const [pinned, setPinned] = useState(false);
+
+  const artifactType = data.artifactType as string | undefined;
+  if (artifactType !== "chart") return <GenericResult data={data} />;
+
+  const spec = data.data as ChartSpec | undefined;
+  if (!spec?.data?.length || !spec.chartType) return <GenericResult data={data} />;
+
+  const handlePin = async () => {
+    if (!projectId || pinned) return;
+    try {
+      await pinWidget(projectId, {
+        title: spec.title,
+        queryText: spec.description ?? spec.title,
+        queryCode: "",
+        chartSpec: {
+          type: spec.chartType as "bar" | "line" | "pie" | "heatmap",
+          title: spec.title,
+          data: spec.data,
+          xKey: spec.xKey,
+          yKey: spec.yKey,
+        },
+      });
+      setPinned(true);
+      toast.success("Pinned to dashboard");
+      setTimeout(() => setPinned(false), 3000);
+    } catch {
+      toast.error("Failed to pin to dashboard");
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-cm-border-subtle bg-cm-bg-elevated">
+        <div className="flex items-center gap-1.5">
+          <BarChart3 className="h-3.5 w-3.5 text-cm-accent" />
+          <span className="text-xs font-medium text-cm-text-primary">{spec.title}</span>
+        </div>
+        <button
+          type="button"
+          onClick={handlePin}
+          disabled={pinned}
+          className={cn(
+            "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+            pinned
+              ? "bg-green-50 text-green-700"
+              : "bg-cm-accent-subtle text-cm-accent hover:bg-cm-accent-muted",
+          )}
+        >
+          {pinned ? <Check className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+          {pinned ? "Pinned" : "Pin to Dashboard"}
+        </button>
+      </div>
+
+      <div className="p-3" style={{ height: 280 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          {renderChart(spec)}
+        </ResponsiveContainer>
+      </div>
+
+      {spec.description && (
+        <div className="border-t border-cm-border-subtle px-3 py-2 text-xs text-cm-text-secondary">
+          {spec.description}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderChart(spec: ChartSpec) {
+  const { chartType, xKey, yKey, data: chartData } = spec;
+
+  const commonAxisProps = {
+    tick: { fontSize: 10, fill: "var(--cm-text-tertiary, #94a3b8)" },
+    axisLine: { stroke: "var(--cm-border-subtle, #e2e8f0)" },
+    tickLine: false,
+  };
+
+  switch (chartType) {
+    case "bar":
+      return (
+        <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--cm-border-subtle, #e2e8f0)" />
+          <XAxis dataKey={xKey} {...commonAxisProps} />
+          <YAxis {...commonAxisProps} width={40} />
+          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Bar dataKey={yKey} fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
+        </BarChart>
+      );
+
+    case "line":
+      return (
+        <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--cm-border-subtle, #e2e8f0)" />
+          <XAxis dataKey={xKey} {...commonAxisProps} />
+          <YAxis {...commonAxisProps} width={40} />
+          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Line type="monotone" dataKey={yKey} stroke={CHART_COLORS[0]} strokeWidth={2} dot={{ r: 3 }} />
+        </LineChart>
+      );
+
+    case "area":
+      return (
+        <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--cm-border-subtle, #e2e8f0)" />
+          <XAxis dataKey={xKey} {...commonAxisProps} />
+          <YAxis {...commonAxisProps} width={40} />
+          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Area type="monotone" dataKey={yKey} stroke={CHART_COLORS[0]} fill={CHART_COLORS[0]} fillOpacity={0.2} />
+        </AreaChart>
+      );
+
+    case "scatter":
+      return (
+        <ScatterChart margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--cm-border-subtle, #e2e8f0)" />
+          <XAxis dataKey={xKey} name={xKey} {...commonAxisProps} />
+          <YAxis dataKey={yKey} name={yKey} {...commonAxisProps} width={40} />
+          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} cursor={{ strokeDasharray: "3 3" }} />
+          <Scatter data={chartData} fill={CHART_COLORS[0]} />
+        </ScatterChart>
+      );
+
+    case "pie":
+      return (
+        <PieChart>
+          <Pie
+            data={chartData}
+            dataKey={yKey}
+            nameKey={xKey}
+            cx="50%"
+            cy="50%"
+            outerRadius={90}
+            label={({ name, percent }) =>
+              `${String(name).length > 12 ? String(name).slice(0, 12) + "…" : name} ${(percent * 100).toFixed(0)}%`
+            }
+            labelLine={{ strokeWidth: 1 }}
+            style={{ fontSize: 10 }}
+          >
+            {chartData.map((_, i) => (
+              <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+            ))}
+          </Pie>
+          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+        </PieChart>
+      );
+
+    default:
+      return (
+        <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--cm-border-subtle, #e2e8f0)" />
+          <XAxis dataKey={xKey} {...commonAxisProps} />
+          <YAxis {...commonAxisProps} width={40} />
+          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+          <Bar dataKey={yKey} fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
+        </BarChart>
+      );
+  }
 }
 
 function GenericResult({ data }: { data: Record<string, unknown> }) {

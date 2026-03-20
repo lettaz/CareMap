@@ -59,3 +59,7 @@ export function patchProfile(
     body: JSON.stringify(patch),
   });
 }
+
+export function deleteSourceFile(sourceFileId: string): Promise<void> {
+  return apiFetch<void>(`/api/ingest/${sourceFileId}`, { method: "DELETE" });
+}

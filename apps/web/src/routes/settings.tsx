@@ -4,6 +4,7 @@ import { ModelConfig } from "@/components/settings/model-config";
 import { MappingThresholds } from "@/components/settings/mapping-thresholds";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -14,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Trash2, Zap, Loader2 } from "lucide-react";
+import { Trash2, Zap, Loader2, Pencil, Check, X } from "lucide-react";
 import { useActiveProject } from "@/hooks/use-active-project";
 import { useProjectStore } from "@/lib/stores/project-store";
 
@@ -24,9 +25,36 @@ export default function SettingsPage() {
   const [clearing, setClearing] = useState(false);
   const { project } = useActiveProject();
   const updateProjectSettings = useProjectStore((s) => s.updateProjectSettings);
+  const updateProject = useProjectStore((s) => s.updateProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
 
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState("");
+  const [descValue, setDescValue] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
   const yoloMode = (project?.settings?.yoloMode as boolean) ?? false;
+
+  const startEditName = useCallback(() => {
+    if (!project) return;
+    setNameValue(project.name);
+    setDescValue(project.description ?? "");
+    setEditingName(true);
+  }, [project]);
+
+  const saveNameEdit = useCallback(async () => {
+    if (!project || !nameValue.trim()) return;
+    setSavingName(true);
+    try {
+      await updateProject(project.id, {
+        name: nameValue.trim(),
+        description: descValue.trim() || undefined,
+      });
+      setEditingName(false);
+    } finally {
+      setSavingName(false);
+    }
+  }, [project, nameValue, descValue, updateProject]);
 
   const handleYoloToggle = useCallback(
     (checked: boolean) => {
@@ -55,6 +83,69 @@ export default function SettingsPage() {
 
         {project && (
           <>
+            <section className="space-y-4">
+              <h2 className="text-sm font-medium text-cm-text-secondary uppercase tracking-wider">
+                Project Info
+              </h2>
+              <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface p-4">
+                {editingName ? (
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-cm-text-secondary">Name</label>
+                      <Input
+                        value={nameValue}
+                        onChange={(e) => setNameValue(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && saveNameEdit()}
+                        autoFocus
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-cm-text-secondary">Description</label>
+                      <Input
+                        value={descValue}
+                        onChange={(e) => setDescValue(e.target.value)}
+                        placeholder="Brief description..."
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={saveNameEdit}
+                        disabled={!nameValue.trim() || savingName}
+                        className="h-7 text-xs bg-cm-accent text-white hover:bg-cm-accent-hover"
+                      >
+                        {savingName ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
+                        Save
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditingName(false)} className="h-7 text-xs">
+                        <X className="mr-1 h-3 w-3" />
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-cm-text-primary">{project.name}</p>
+                      <p className="mt-0.5 text-xs text-cm-text-secondary">
+                        {project.description || "No description"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={startEditName}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-primary transition-colors shrink-0"
+                      title="Edit"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <Separator />
+
             <section className="space-y-4">
               <h2 className="text-sm font-medium text-cm-text-secondary uppercase tracking-wider">
                 Pipeline Mode

@@ -137,7 +137,15 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
       .single();
 
     if (error) throw new Error(`Failed to pin artifact: ${error.message}`);
-    return reply.status(201).send(data);
+
+    return reply.status(201).send({
+      id: data.id,
+      title: data.title,
+      queryText: data.query_text,
+      queryCode: data.query_code,
+      chartSpec: data.chart_spec,
+      pinnedAt: data.pinned_at ?? data.created_at,
+    });
   });
 
   app.delete<{ Params: { widgetId: string } }>("/artifacts/:widgetId", async (request, reply) => {

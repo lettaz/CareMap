@@ -18,6 +18,7 @@ import {
   type PipelineNodeDTO,
   type PipelineEdgeDTO,
 } from "@/lib/api/pipeline";
+import { deleteSourceFile } from "@/lib/api/ingest";
 
 export interface PipelineData {
   nodes: PipelineNode[];
@@ -241,12 +242,31 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
   },
 
   onNodesChange: (projectId, changes) => {
+    const removeChanges = changes.filter((c) => c.type === "remove");
+    if (removeChanges.length > 0) {
+      const p = getPipeline(get(), projectId);
+      for (const change of removeChanges) {
+        if (change.type !== "remove") continue;
+        const node = p.nodes.find((n) => n.id === change.id);
+        const sfId = node?.data.category === "source"
+          ? (node.data.sourceFileId as string | undefined)
+          : undefined;
+        if (sfId) {
+          deleteSourceFile(sfId).catch((err) => {
+            toast.error("Failed to delete source data", { description: (err as Error).message });
+          });
+        }
+      }
+    }
+
     set((state) => {
       const p = getPipeline(state, projectId);
       return { pipelines: { ...state.pipelines, [projectId]: { ...p, nodes: applyNodeChanges(changes, p.nodes) } } };
     });
+
     const hasPositionChange = changes.some((c) => c.type === "position" && c.dragging === false);
-    if (hasPositionChange) {
+    const hasRemove = removeChanges.length > 0;
+    if (hasPositionChange || hasRemove) {
       debouncedSave(projectId, () => getPipeline(get(), projectId));
     }
   },
@@ -297,20 +317,32 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
   },
 
   removeNode: (projectId, nodeId) => {
+    const p = getPipeline(get(), projectId);
+    const node = p.nodes.find((n) => n.id === nodeId);
+    const sourceFileId = node?.data.category === "source"
+      ? (node.data.sourceFileId as string | undefined)
+      : undefined;
+
     set((state) => {
-      const p = getPipeline(state, projectId);
+      const pipeline = getPipeline(state, projectId);
       return {
         pipelines: {
           ...state.pipelines,
           [projectId]: {
-            ...p,
-            nodes: p.nodes.filter((n) => n.id !== nodeId),
-            edges: p.edges.filter((e) => e.source !== nodeId && e.target !== nodeId),
-            selectedNodeId: p.selectedNodeId === nodeId ? null : p.selectedNodeId,
+            ...pipeline,
+            nodes: pipeline.nodes.filter((n) => n.id !== nodeId),
+            edges: pipeline.edges.filter((e) => e.source !== nodeId && e.target !== nodeId),
+            selectedNodeId: pipeline.selectedNodeId === nodeId ? null : pipeline.selectedNodeId,
           },
         },
       };
     });
     debouncedSave(projectId, () => getPipeline(get(), projectId));
+
+    if (sourceFileId) {
+      deleteSourceFile(sourceFileId).catch((err) => {
+        toast.error("Failed to delete source data", { description: (err as Error).message });
+      });
+    }
   },
 }));
