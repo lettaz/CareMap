@@ -20,14 +20,15 @@ export function StoreStatusTab() {
 
     Promise.all([
       fetchHarmonizedTables(projectId).catch(() => ({ tables: [] })),
-      fetchMappings(projectId).catch(() => [] as FieldMappingDTO[]),
+      fetchMappings(projectId, { page: 1, pageSize: 500 }).catch(() => ({ data: [] as FieldMappingDTO[], total: 0, page: 1, pageSize: 500 })),
       fetchProjectSources(projectId).catch(() => []),
-    ]).then(([harmonized, mappings, sources]) => {
+    ]).then(([harmonized, mappingsRes, sources]) => {
       setTables(harmonized.tables);
       setTotalRows(sources.reduce((acc, s) => acc + (s.row_count ?? 0), 0));
       setSourceCount(sources.length);
-      setTotalMappings(mappings.length);
-      setAcceptedMappings(mappings.filter((m) => m.status === "accepted").length);
+      const mappingsList = mappingsRes.data;
+      setTotalMappings(mappingsList.length);
+      setAcceptedMappings(mappingsList.filter((m: FieldMappingDTO) => m.status === "accepted").length);
       setLoading(false);
     });
   }, [projectId]);

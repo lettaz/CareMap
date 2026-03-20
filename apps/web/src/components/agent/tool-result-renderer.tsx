@@ -450,8 +450,8 @@ function renderChart(spec: ChartSpec) {
             cx="50%"
             cy="50%"
             outerRadius={90}
-            label={({ name, percent }) =>
-              `${String(name).length > 12 ? String(name).slice(0, 12) + "…" : name} ${(percent * 100).toFixed(0)}%`
+            label={({ name, percent }: { name?: unknown; percent?: number }) =>
+              `${String(name ?? "").length > 12 ? String(name ?? "").slice(0, 12) + "…" : String(name ?? "")} ${((percent ?? 0) * 100).toFixed(0)}%`
             }
             labelLine={{ strokeWidth: 1 }}
             style={{ fontSize: 10 }}

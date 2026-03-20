@@ -73,7 +73,7 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [activating, setActivating] = useState(false);
   const [activeTab, setActiveTab] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const wasRunningRef = useRef(false);
 
   const isRunning = node?.data.status === "running";

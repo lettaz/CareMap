@@ -17,7 +17,6 @@ import { EditableLabel } from "@/components/shared/editable-label";
 import { triggerPipeline } from "@/lib/api/pipeline";
 import { fetchHarmonizedTables, type HarmonizedTableDTO } from "@/lib/api/harmonize";
 import { fetchMappings } from "@/lib/api/mappings";
-import { cn } from "@/lib/utils";
 
 interface HarmonizeDetailPanelProps {
   nodeId: string;

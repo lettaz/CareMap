@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { supabase } from "../config/supabase.js";
 import { parseCsv, parseExcel, profileColumns, saveProfiles } from "../services/profiler.js";
-import { uploadFile, rawPath, downloadFile, deleteFiles, cleanedPath } from "../services/storage.js";
+import { uploadFile, rawPath, downloadFile, deleteFiles } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
 import { logStep } from "../lib/step-logger.js";
 import { env } from "../config/env.js";

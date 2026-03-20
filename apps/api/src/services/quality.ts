@@ -1,5 +1,4 @@
 import { supabase } from "../config/supabase.js";
-import type { QualityAlertRow } from "../lib/types/database.js";
 
 interface ComputedAlert {
   id: string;
@@ -45,10 +44,9 @@ async function computeLiveAlerts(projectId: string): Promise<ComputedAlert[]> {
   let counter = 0;
   const liveId = () => `live-${++counter}`;
 
-  const [filesResult, mappingsResult, profilesResult] = await Promise.all([
+  const [filesResult, mappingsResult] = await Promise.all([
     supabase.from("source_files").select("id, filename, status, row_count, raw_profile, uploaded_at").eq("project_id", projectId),
     supabase.from("field_mappings").select("id, source_file_id, source_column, target_column, confidence, status").eq("project_id", projectId),
-    supabase.from("source_profiles").select("source_file_id, column_name, quality_flags, confidence").eq("source_file_id", projectId),
   ]);
 
   const files = filesResult.data ?? [];
