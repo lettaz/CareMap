@@ -11,6 +11,16 @@ import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useActiveProject } from "@/hooks/use-active-project";
 import type { NodeCategory, PipelineNode } from "@/lib/types";
 
+const NODE_HEIGHT = 160;
+const NODE_GAP = 24;
+
+const CATEGORY_X: Record<NodeCategory, number> = {
+  source: 50,
+  transform: 400,
+  quality: 700,
+  sink: 1000,
+};
+
 const NODE_OPTIONS = [
   { category: "source" as NodeCategory, label: "Source", icon: FileUp, color: "text-cm-node-source", bg: "bg-cm-node-source-subtle", desc: "Upload a CSV, XLSX or TXT file" },
   { category: "transform" as NodeCategory, label: "Transform", icon: Shuffle, color: "text-cm-node-transform", bg: "bg-cm-node-transform-subtle", desc: "Map & join fields across sources" },
@@ -25,13 +35,26 @@ export function NodePalette() {
   const addNode = usePipelineStore((s) => s.addNode);
   const selectNode = usePipelineStore((s) => s.selectNode);
 
+  const nodes = usePipelineStore(
+    (s) => (projectId ? s.pipelines[projectId]?.nodes : undefined) ?? [],
+  );
+
   const handleAdd = (category: NodeCategory, label: string) => {
     if (!projectId) return;
     const id = `${category}-${Date.now()}`;
+    const x = CATEGORY_X[category] ?? 250;
+    const sameCol = nodes.filter(
+      (n) => Math.abs(n.position.x - x) < 100,
+    );
+    const maxY = sameCol.length
+      ? Math.max(...sameCol.map((n) => n.position.y))
+      : -NODE_GAP;
+    const y = maxY + NODE_HEIGHT + NODE_GAP;
+
     const node: PipelineNode = {
       id,
       type: category === "sink" ? "sink" : category,
-      position: { x: 250 + Math.random() * 100, y: 200 + Math.random() * 100 },
+      position: { x, y },
       data: { category, status: "idle", label },
     };
     addNode(projectId, node);

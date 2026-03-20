@@ -24,6 +24,7 @@ interface ProjectState {
   projects: Project[];
   activeProjectId: string | null;
   loading: boolean;
+  hydrated: boolean;
   error: string | null;
   fetchProjects: () => Promise<void>;
   createProject: (name: string, description: string) => Promise<string>;
@@ -37,16 +38,17 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   projects: [],
   activeProjectId: null,
   loading: false,
+  hydrated: false,
   error: null,
 
   fetchProjects: async () => {
     set({ loading: true, error: null });
     try {
       const dtos = await apiFetchProjects();
-      set({ projects: dtos.map(toProject), loading: false });
+      set({ projects: dtos.map(toProject), loading: false, hydrated: true });
     } catch (err) {
       const msg = (err as Error).message;
-      set({ error: msg, loading: false });
+      set({ error: msg, loading: false, hydrated: true });
       toast.error("Failed to load projects", { description: msg });
     }
   },

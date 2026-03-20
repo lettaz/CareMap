@@ -3,12 +3,17 @@ import { supabase } from "../config/supabase.js";
 import { generateMappings, getMappingsByProject, updateMappingStatus } from "../services/mapper.js";
 import { generateMappingsSchema, updateMappingSchema } from "../lib/types/api.js";
 import { ValidationError, NotFoundError } from "../lib/errors.js";
+import { parsePagination, paginationRange, buildPaginatedResponse } from "../lib/pagination.js";
 
 export const mappingRoutes: FastifyPluginAsync = async (app) => {
-  app.get<{ Querystring: { projectId: string } }>("/", async (request) => {
+  app.get<{ Querystring: { projectId: string; page?: string; pageSize?: string } }>("/", async (request) => {
     const { projectId } = request.query;
     if (!projectId) throw new ValidationError("projectId is required");
-    return getMappingsByProject(projectId);
+
+    const pagination = parsePagination(request.query);
+    const range = paginationRange(pagination);
+    const { data, total } = await getMappingsByProject(projectId, range);
+    return buildPaginatedResponse(data, total, pagination);
   });
 
   app.post<{ Querystring: { projectId: string } }>("/generate", async (request) => {

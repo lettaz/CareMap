@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { supabase } from "../config/supabase.js";
 import { parseCsv, parseExcel, profileColumns, saveProfiles } from "../services/profiler.js";
-import { uploadFile, rawPath } from "../services/storage.js";
+import { uploadFile, rawPath, downloadFile } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
 import { logStep } from "../lib/step-logger.js";
 
@@ -168,6 +168,39 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
 
     reply.raw.end();
   });
+
+  // ── Get sample rows for a source file (paginated) ──
+  app.get<{ Params: { sourceFileId: string }; Querystring: { page?: string; pageSize?: string } }>(
+    "/:sourceFileId/sample-rows",
+    async (request) => {
+      const { sourceFileId } = request.params;
+      const page = Math.max(1, Number(request.query.page) || 1);
+      const pageSize = Math.min(50, Math.max(1, Number(request.query.pageSize) || 20));
+
+      const { data: file, error } = await supabase
+        .from("source_files")
+        .select("project_id, file_type, storage_path")
+        .eq("id", sourceFileId)
+        .single();
+
+      if (error || !file) throw new Error("Source file not found");
+      if (!file.storage_path) return { data: [], total: 0, page, pageSize };
+
+      const buffer = await downloadFile(file.storage_path);
+      const isExcel = file.file_type === "xlsx" || file.file_type === "xls";
+      const isTsv = file.file_type === "tsv";
+
+      const parsed = isExcel
+        ? parseExcel(buffer)
+        : parseCsv(buffer.toString("utf-8"), isTsv ? "\t" : undefined);
+
+      const total = parsed.rows.length;
+      const from = (page - 1) * pageSize;
+      const sliced = parsed.rows.slice(from, from + pageSize);
+
+      return { data: sliced, total, page, pageSize };
+    },
+  );
 
   // ── Get profile for a source file ──
   app.get<{ Params: { sourceFileId: string } }>("/:sourceFileId/profile", async (request) => {

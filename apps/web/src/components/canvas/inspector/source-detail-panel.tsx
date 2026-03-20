@@ -1,14 +1,22 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { MessageCircle, X, AlertTriangle, Filter, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
+import { useAgentStore } from "@/lib/stores/agent-store";
 import { useActiveProject } from "@/hooks/use-active-project";
 import { EditableLabel } from "@/components/shared/editable-label";
 import { SourceUploadZone } from "./source-upload-zone";
 import { SourceAnalyzingState } from "./source-analyzing-state";
+import { SourceDataTable } from "./source-data-table";
+import { SourceSummaryBar } from "./source-summary-bar";
 import { uploadWithSSE } from "@/lib/api/sse";
-import { fetchDetailedProfile, type DetailedProfileDTO } from "@/lib/api/ingest";
+import {
+  fetchDetailedProfile,
+  fetchSampleRows,
+  type DetailedProfileDTO,
+} from "@/lib/api/ingest";
+import type { SourcePreview, SourcePreviewColumn } from "@/lib/types";
 
 type PanelPhase = "upload" | "analyzing" | "preview";
 
@@ -36,21 +44,40 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const updateNodeData = usePipelineStore((s) => s.updateNodeData);
 
   const hasExistingData = !!node?.data.sourceFileId && node?.data.status === "ready";
+  const sourceFileId = node?.data.sourceFileId as string | undefined;
 
   const [phase, setPhase] = useState<PanelPhase>(hasExistingData ? "preview" : "upload");
   const [uploadedFile, setUploadedFile] = useState<{ name: string; size: string } | null>(null);
   const [steps, setSteps] = useState<AnalysisStep[]>([]);
   const [profile, setProfile] = useState<DetailedProfileDTO | null>(null);
+  const [sampleRows, setSampleRows] = useState<Record<string, unknown>[] | null>(null);
   const [showIssuesOnly, setShowIssuesOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const prevNodeId = useRef(nodeId);
 
   useEffect(() => {
-    if (hasExistingData && node?.data.sourceFileId && !profile) {
-      fetchDetailedProfile(node.data.sourceFileId as string)
-        .then(setProfile)
-        .catch(() => {});
+    if (prevNodeId.current !== nodeId) {
+      prevNodeId.current = nodeId;
+      setProfile(null);
+      setSampleRows(null);
+      setShowIssuesOnly(false);
+      setError(null);
+      setPhase(hasExistingData ? "preview" : "upload");
     }
-  }, [hasExistingData, node?.data.sourceFileId, profile]);
+  }, [nodeId, hasExistingData]);
+
+  useEffect(() => {
+    if (!hasExistingData || !sourceFileId) return;
+    if (profile?.sourceFileId === sourceFileId) return;
+
+    fetchDetailedProfile(sourceFileId)
+      .then(setProfile)
+      .catch(() => {});
+
+    fetchSampleRows(sourceFileId, { page: 1, pageSize: 20 })
+      .then((res) => setSampleRows(res.data))
+      .catch(() => setSampleRows([]));
+  }, [hasExistingData, sourceFileId, profile?.sourceFileId]);
 
   const handleFileSelected = useCallback(
     (file: File) => {
@@ -156,6 +183,57 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
     [projectId, nodeId, updateNodeData],
   );
 
+  const setNodeContext = useAgentStore((s) => s.setNodeContext);
+  const isPanelOpen = useAgentStore((s) => s.isPanelOpen);
+  const togglePanel = useAgentStore((s) => s.togglePanel);
+
+  const preview = useMemo<SourcePreview | null>(() => {
+    if (!profile) return null;
+
+    const columns: SourcePreviewColumn[] = profile.columns.map((c) => {
+      const stats = c.nativeStats as Record<string, unknown>;
+      return {
+        name: c.columnName,
+        type: mapColumnType(stats?.detectedType as string),
+        nullCount: Number(stats?.nullCount ?? 0),
+        uniqueCount: Number(stats?.uniqueCount ?? 0),
+        min: stats?.min as number | undefined,
+        max: stats?.max as number | undefined,
+        mean: stats?.mean as number | undefined,
+        topValues: (stats?.topValues as { value: string }[])?.map((t) => t.value)
+          ?? (stats?.sampleValues as string[])?.slice(0, 5),
+      };
+    });
+
+    const totalNulls = columns.reduce((s, c) => s + c.nullCount, 0);
+    const totalCells = profile.rowCount * profile.columnCount;
+    const completeness = totalCells > 0 ? 1 - totalNulls / totalCells : 1;
+    const issueCount = columns.filter(
+      (c) => c.nullCount / profile.rowCount > 0.1,
+    ).length;
+
+    const summaryObj = profile.summary as Record<string, unknown> | string | null;
+    const aiSummary = typeof summaryObj === "string"
+      ? summaryObj
+      : typeof summaryObj === "object" && summaryObj
+        ? (summaryObj.description as string) ?? buildAutoSummary(profile, columns, issueCount)
+        : buildAutoSummary(profile, columns, issueCount);
+
+    const rows = (sampleRows ?? []) as Record<string, string | number | null>[];
+
+    return {
+      sourceFileId: profile.sourceFileId,
+      filename: profile.filename,
+      totalRows: profile.rowCount,
+      totalColumns: profile.columnCount,
+      columns,
+      rows,
+      aiSummary,
+      issueCount,
+      completeness,
+    };
+  }, [profile, sampleRows]);
+
   if (!node || !projectId) return null;
 
   const subtitle =
@@ -173,9 +251,17 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
     [projectId, nodeId, updateNodeData],
   );
 
-  const issueCount = profile?.columns.filter(
-    (c) => (c.nativeStats?.nullCount as number) > 0 || (c.nativeStats?.emptyCount as number) > 0
-  ).length ?? 0;
+  const handleOpenChat = useCallback(() => {
+    if (!projectId || !node) return;
+    selectNode(projectId, null);
+    setNodeContext({
+      nodeId,
+      label: node.data.label,
+      sourceFileId: sourceFileId ?? undefined,
+      filename: profile?.filename,
+    });
+    if (!isPanelOpen) togglePanel();
+  }, [projectId, nodeId, node, sourceFileId, profile, selectNode, setNodeContext, isPanelOpen, togglePanel]);
 
   return (
     <div className="flex w-full flex-col overflow-hidden">
@@ -193,8 +279,8 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            onClick={() => selectNode(projectId, null)}
-            title="Back to Chat"
+            onClick={handleOpenChat}
+            title="Open AI Chat"
           >
             <MessageCircle className="h-3.5 w-3.5" />
           </Button>
@@ -229,11 +315,11 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         />
       )}
 
-      {phase === "preview" && profile && (
+      {phase === "preview" && preview && (
         <>
-          <ProfileSummary profile={profile} />
+          <SourceSummaryBar preview={preview} onAiClick={handleOpenChat} />
 
-          {issueCount > 0 && (
+          {preview.issueCount > 0 && (
             <div className="flex items-center justify-between border-b border-cm-border-primary px-4 py-2 shrink-0">
               <button
                 onClick={() => setShowIssuesOnly(!showIssuesOnly)}
@@ -244,18 +330,21 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                 }`}
               >
                 {showIssuesOnly ? <AlertTriangle className="h-3 w-3" /> : <Filter className="h-3 w-3" />}
-                {showIssuesOnly ? `${issueCount} issues` : `Show ${issueCount} issues`}
+                {showIssuesOnly ? `${preview.issueCount} issues` : `Show ${preview.issueCount} issues`}
               </button>
+              <span className="text-[10px] text-cm-text-tertiary">
+                {showIssuesOnly ? "Showing issue columns" : "Showing all columns"}
+              </span>
             </div>
           )}
 
           <div className="flex-1 overflow-auto">
-            <ProfileTable profile={profile} showIssuesOnly={showIssuesOnly} />
+            <SourceDataTable preview={preview} showIssuesOnly={showIssuesOnly} />
           </div>
         </>
       )}
 
-      {phase === "preview" && !profile && (
+      {phase === "preview" && !preview && (
         <div className="flex flex-1 items-center justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-cm-accent" />
         </div>
@@ -264,62 +353,44 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   );
 }
 
-function ProfileSummary({ profile }: { profile: DetailedProfileDTO }) {
-  return (
-    <div className="grid grid-cols-3 gap-px border-b border-cm-border-primary bg-cm-border-primary">
-      {[
-        { label: "Rows", value: profile.rowCount.toLocaleString() },
-        { label: "Columns", value: profile.columnCount.toString() },
-        { label: "Status", value: profile.status },
-      ].map((item) => (
-        <div key={item.label} className="bg-cm-bg-surface px-3 py-2">
-          <p className="text-[10px] font-medium text-cm-text-tertiary uppercase">{item.label}</p>
-          <p className="text-sm font-semibold text-cm-text-primary">{item.value}</p>
-        </div>
-      ))}
-    </div>
-  );
+function mapColumnType(detected: string | undefined): "string" | "number" | "date" | "code" {
+  if (!detected) return "string";
+  const lower = detected.toLowerCase();
+  if (lower.includes("int") || lower.includes("float") || lower.includes("number") || lower.includes("numeric"))
+    return "number";
+  if (lower.includes("date") || lower.includes("time") || lower.includes("timestamp"))
+    return "date";
+  if (lower.includes("code") || lower.includes("category") || lower.includes("enum"))
+    return "code";
+  return "string";
 }
 
-function ProfileTable({
-  profile,
-  showIssuesOnly,
-}: {
-  profile: DetailedProfileDTO;
-  showIssuesOnly: boolean;
-}) {
-  const columns = showIssuesOnly
-    ? profile.columns.filter(
-        (c) => (c.nativeStats?.nullCount as number) > 0 || (c.nativeStats?.emptyCount as number) > 0
-      )
-    : profile.columns;
+function buildAutoSummary(
+  profile: DetailedProfileDTO,
+  columns: SourcePreviewColumn[],
+  issueCount: number,
+): string {
+  const domains = new Set<string>();
+  for (const c of profile.columns) {
+    const llm = c.llmInterpretation as Record<string, unknown>;
+    if (llm?.domain) domains.add(String(llm.domain).replaceAll("_", " "));
+  }
 
-  return (
-    <table className="w-full text-xs">
-      <thead className="sticky top-0 bg-cm-bg-elevated">
-        <tr>
-          <th className="px-3 py-2 text-left font-medium text-cm-text-secondary">Column</th>
-          <th className="px-3 py-2 text-left font-medium text-cm-text-secondary">Type</th>
-          <th className="px-3 py-2 text-left font-medium text-cm-text-secondary">Label</th>
-          <th className="px-3 py-2 text-right font-medium text-cm-text-secondary">Nulls</th>
-        </tr>
-      </thead>
-      <tbody>
-        {columns.map((col) => {
-          const llm = col.llmInterpretation as Record<string, unknown> | undefined;
-          const stats = col.nativeStats as Record<string, unknown> | undefined;
-          return (
-            <tr key={col.columnName} className="border-t border-cm-border-subtle">
-              <td className="px-3 py-1.5 font-mono text-cm-text-primary">{col.columnName}</td>
-              <td className="px-3 py-1.5 text-cm-text-tertiary">{String(stats?.inferredType ?? "")}</td>
-              <td className="px-3 py-1.5 text-cm-text-secondary">{String(llm?.semanticLabel ?? "")}</td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-cm-text-tertiary">
-                {String(stats?.nullCount ?? 0)}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
+  const issueColumns = columns
+    .filter((c) => c.nullCount / profile.rowCount > 0.1)
+    .map((c) => c.name);
+
+  let summary = `${profile.filename} with ${profile.rowCount.toLocaleString()} records`;
+  if (domains.size > 0) summary += ` across ${domains.size} clinical domain${domains.size > 1 ? "s" : ""}`;
+  summary += ".";
+
+  if (issueCount > 0) {
+    summary += ` ${issueCount} column${issueCount > 1 ? "s have" : " has"} quality issues`;
+    if (issueColumns.length <= 3) {
+      summary += ` — ${issueColumns.join(", ")}`;
+    }
+    summary += ".";
+  }
+
+  return summary;
 }

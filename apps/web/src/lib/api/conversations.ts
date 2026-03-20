@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import type { PaginatedResponse } from "@/lib/types/pagination";
 
 export interface ConversationDTO {
   id: string;
@@ -33,9 +34,16 @@ export function createConversation(
 
 export function fetchMessages(
   conversationId: string,
-): Promise<ConversationMessageDTO[]> {
-  return apiFetch<ConversationMessageDTO[]>(
-    `/api/projects/conversations/${conversationId}/messages`,
+  pagination?: { page: number; pageSize: number },
+): Promise<PaginatedResponse<ConversationMessageDTO>> {
+  const params = new URLSearchParams();
+  if (pagination) {
+    params.set("page", String(pagination.page));
+    params.set("pageSize", String(pagination.pageSize));
+  }
+  const qs = params.toString();
+  return apiFetch<PaginatedResponse<ConversationMessageDTO>>(
+    `/api/projects/conversations/${conversationId}/messages${qs ? `?${qs}` : ""}`,
   );
 }
 

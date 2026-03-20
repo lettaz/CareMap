@@ -136,13 +136,21 @@ export async function updateMappingStatus(
   return data as FieldMappingRow;
 }
 
-export async function getMappingsByProject(projectId: string): Promise<FieldMappingRow[]> {
-  const { data, error } = await supabase
+export async function getMappingsByProject(
+  projectId: string,
+  opts?: { from?: number; to?: number },
+): Promise<{ data: FieldMappingRow[]; total: number }> {
+  let query = supabase
     .from("field_mappings")
-    .select()
+    .select("*", { count: "exact" })
     .eq("project_id", projectId)
     .order("confidence", { ascending: false });
 
+  if (opts?.from !== undefined && opts?.to !== undefined) {
+    query = query.range(opts.from, opts.to);
+  }
+
+  const { data, error, count } = await query;
   if (error) throw new Error(`Failed to fetch mappings: ${error.message}`);
-  return data as FieldMappingRow[];
+  return { data: data as FieldMappingRow[], total: count ?? 0 };
 }

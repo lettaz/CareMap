@@ -3,6 +3,7 @@ import { z } from "zod";
 import { supabase } from "../config/supabase.js";
 import { getAlertsByProject, acknowledgeAlert, runManualQualityCheck } from "../services/quality.js";
 import { ValidationError } from "../lib/errors.js";
+import { parsePagination, paginationRange, buildPaginatedResponse } from "../lib/pagination.js";
 
 const pinArtifactSchema = z.object({
   title: z.string().min(1),
@@ -49,6 +50,71 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
       lineage,
       corrections,
     };
+  });
+
+  app.get<{ Querystring: { projectId: string; page?: string; pageSize?: string } }>("/alerts", async (request) => {
+    const { projectId } = request.query;
+    if (!projectId) throw new ValidationError("projectId is required");
+
+    const pagination = parsePagination(request.query);
+    const { from, to } = paginationRange(pagination);
+
+    const { data, error, count } = await supabase
+      .from("quality_alerts")
+      .select("*", { count: "exact" })
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false })
+      .range(from, to);
+
+    if (error) throw new Error(`Failed to fetch alerts: ${error.message}`);
+
+    const mapped = (data ?? []).map((a: Record<string, unknown>) => ({
+      id: a.id,
+      severity: a.severity,
+      summary: a.summary,
+      affectedCount: a.affected_count,
+      acknowledged: a.acknowledged,
+      createdAt: a.created_at,
+      sourceFileId: a.source_file_id,
+      detectionMethod: a.detection_method,
+    }));
+
+    return buildPaginatedResponse(mapped, count ?? 0, pagination);
+  });
+
+  app.get<{ Querystring: { projectId: string; page?: string; pageSize?: string } }>("/corrections", async (request) => {
+    const { projectId } = request.query;
+    if (!projectId) throw new ValidationError("projectId is required");
+
+    const pagination = parsePagination(request.query);
+    const { from, to } = paginationRange(pagination);
+
+    try {
+      const { data, error, count } = await supabase
+        .from("corrections_log")
+        .select("*", { count: "exact" })
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false })
+        .range(from, to);
+
+      if (error) return buildPaginatedResponse([], 0, pagination);
+
+      const mapped = (data ?? []).map((c: Record<string, unknown>) => ({
+        id: c.id,
+        timestamp: c.created_at,
+        action: c.action,
+        description: c.description,
+        sourceFileId: c.source_file_id,
+        field: c.field,
+        previousValue: c.previous_value,
+        newValue: c.new_value,
+        appliedBy: c.applied_by,
+      }));
+
+      return buildPaginatedResponse(mapped, count ?? 0, pagination);
+    } catch {
+      return buildPaginatedResponse([], 0, pagination);
+    }
   });
 
   app.post<{ Querystring: { projectId: string } }>("/artifacts/pin", async (request, reply) => {

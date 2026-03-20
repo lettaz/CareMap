@@ -1,5 +1,6 @@
 import { apiFetch } from "./client";
 import type { ChartSpec, CompletenessData, LineageEntry, CorrectionEntry } from "@/lib/types";
+import type { PaginatedResponse } from "@/lib/types/pagination";
 
 export interface DashboardWidgetDTO {
   id: string;
@@ -78,4 +79,28 @@ export function runQualityCheck(projectId: string): Promise<{
   return apiFetch(`/api/dashboard/quality-check?projectId=${projectId}`, {
     method: "POST",
   });
+}
+
+export function fetchAlertsPaginated(
+  projectId: string,
+  pagination: { page: number; pageSize: number },
+): Promise<PaginatedResponse<DashboardAlertDTO>> {
+  const params = new URLSearchParams({
+    projectId,
+    page: String(pagination.page),
+    pageSize: String(pagination.pageSize),
+  });
+  return apiFetch<PaginatedResponse<DashboardAlertDTO>>(`/api/dashboard/alerts?${params}`);
+}
+
+export function fetchCorrectionsPaginated(
+  projectId: string,
+  pagination: { page: number; pageSize: number },
+): Promise<PaginatedResponse<CorrectionEntry>> {
+  const params = new URLSearchParams({
+    projectId,
+    page: String(pagination.page),
+    pageSize: String(pagination.pageSize),
+  });
+  return apiFetch<PaginatedResponse<CorrectionEntry>>(`/api/dashboard/corrections?${params}`);
 }

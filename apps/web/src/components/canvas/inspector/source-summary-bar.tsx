@@ -1,8 +1,9 @@
-import { Sparkles, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Sparkles, AlertTriangle, CheckCircle2, ArrowRight } from "lucide-react";
 import type { SourcePreview } from "@/lib/types";
 
 interface SourceSummaryBarProps {
   preview: SourcePreview;
+  onAiClick?: () => void;
 }
 
 function getHealthColor(completeness: number): string {
@@ -17,7 +18,7 @@ function getHealthBg(completeness: number): string {
   return "bg-cm-error-subtle";
 }
 
-export function SourceSummaryBar({ preview }: SourceSummaryBarProps) {
+export function SourceSummaryBar({ preview, onAiClick }: SourceSummaryBarProps) {
   const pct = Math.round(preview.completeness * 100);
 
   return (
@@ -50,13 +51,17 @@ export function SourceSummaryBar({ preview }: SourceSummaryBarProps) {
         </div>
       </div>
 
-      {/* AI summary */}
-      <div className="flex gap-2 rounded-md bg-cm-bg-elevated px-3 py-2.5">
+      {/* AI summary — clickable to open chat */}
+      <button
+        onClick={onAiClick}
+        className="group flex w-full gap-2 rounded-md bg-cm-bg-elevated px-3 py-2.5 text-left transition-colors hover:bg-cm-accent-subtle"
+      >
         <Sparkles className="h-3.5 w-3.5 text-cm-accent shrink-0 mt-0.5" />
-        <p className="text-xs text-cm-text-secondary leading-relaxed">
+        <p className="flex-1 text-xs text-cm-text-secondary leading-relaxed group-hover:text-cm-text-primary">
           {preview.aiSummary}
         </p>
-      </div>
+        <ArrowRight className="h-3.5 w-3.5 text-cm-text-tertiary shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+      </button>
     </div>
   );
 }

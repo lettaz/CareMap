@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import type { PaginatedResponse } from "@/lib/types/pagination";
 
 export interface ColumnProfileDTO {
   id: string;
@@ -32,6 +33,21 @@ export function fetchProfile(sourceFileId: string): Promise<ColumnProfileDTO[]> 
 
 export function fetchDetailedProfile(sourceFileId: string): Promise<DetailedProfileDTO> {
   return apiFetch<DetailedProfileDTO>(`/api/ingest/${sourceFileId}/profile/detailed`);
+}
+
+export function fetchSampleRows(
+  sourceFileId: string,
+  pagination?: { page: number; pageSize: number },
+): Promise<PaginatedResponse<Record<string, unknown>>> {
+  const params = new URLSearchParams();
+  if (pagination) {
+    params.set("page", String(pagination.page));
+    params.set("pageSize", String(pagination.pageSize));
+  }
+  const qs = params.toString();
+  return apiFetch<PaginatedResponse<Record<string, unknown>>>(
+    `/api/ingest/${sourceFileId}/sample-rows${qs ? `?${qs}` : ""}`,
+  );
 }
 
 export function patchProfile(

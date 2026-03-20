@@ -16,6 +16,8 @@ import {
 import type { QualityAlert, DashboardSourceSummary, AffectedRecord } from "@/lib/types";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useActiveProject } from "@/hooks/use-active-project";
+import { usePagination } from "@/hooks/use-pagination";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -275,6 +277,8 @@ export function AnomalyFeed({ alerts, sources }: AnomalyFeedProps) {
   });
 
   const openCount = sorted.filter((a) => !a.acknowledged).length;
+  const pg = usePagination(sorted.length, { defaultPageSize: 10 });
+  const pageAlerts = sorted.slice((pg.page - 1) * pg.pageSize, pg.page * pg.pageSize);
 
   const handleRunCheck = async () => {
     if (!projectId || checking) return;
@@ -334,7 +338,7 @@ export function AnomalyFeed({ alerts, sources }: AnomalyFeedProps) {
               </p>
             </div>
           ) : (
-            sorted.map((alert) => (
+            pageAlerts.map((alert) => (
               <AlertCard
                 key={alert.id}
                 alert={alert}
@@ -348,6 +352,20 @@ export function AnomalyFeed({ alerts, sources }: AnomalyFeedProps) {
           )}
         </div>
       </div>
+
+      {sorted.length > pg.pageSize && (
+        <PaginationBar
+          page={pg.page}
+          totalPages={pg.totalPages}
+          total={sorted.length}
+          pageSize={pg.pageSize}
+          hasNext={pg.hasNext}
+          hasPrev={pg.hasPrev}
+          onNext={pg.nextPage}
+          onPrev={pg.prevPage}
+          onPageSizeChange={pg.setPageSize}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { apiFetch } from "./client";
 import type { MappingStatus } from "@/lib/types";
+import type { PaginatedResponse } from "@/lib/types/pagination";
 
 export interface FieldMappingDTO {
   id: string;
@@ -14,8 +15,16 @@ export interface FieldMappingDTO {
   sample_value: string | null;
 }
 
-export function fetchMappings(projectId: string): Promise<FieldMappingDTO[]> {
-  return apiFetch<FieldMappingDTO[]>(`/api/mappings?projectId=${projectId}`);
+export function fetchMappings(
+  projectId: string,
+  pagination?: { page: number; pageSize: number },
+): Promise<PaginatedResponse<FieldMappingDTO>> {
+  const params = new URLSearchParams({ projectId });
+  if (pagination) {
+    params.set("page", String(pagination.page));
+    params.set("pageSize", String(pagination.pageSize));
+  }
+  return apiFetch<PaginatedResponse<FieldMappingDTO>>(`/api/mappings?${params}`);
 }
 
 export function updateMapping(

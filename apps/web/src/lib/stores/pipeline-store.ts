@@ -135,6 +135,49 @@ interface PipelineState {
   removeNode: (projectId: string, nodeId: string) => void;
 }
 
+const NODE_HEIGHT = 160;
+const NODE_GAP = 24;
+const NODE_STRIDE = NODE_HEIGHT + NODE_GAP;
+
+function fixOverlappingNodes(nodes: PipelineNode[]): PipelineNode[] {
+  const byColumn = new Map<number, PipelineNode[]>();
+
+  for (const n of nodes) {
+    const col = Math.round(n.position.x / 50) * 50;
+    const arr = byColumn.get(col) ?? [];
+    arr.push(n);
+    byColumn.set(col, arr);
+  }
+
+  const result = [...nodes];
+
+  for (const group of byColumn.values()) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => a.position.y - b.position.y);
+
+    let hasOverlap = false;
+    for (let i = 1; i < group.length; i++) {
+      if (group[i].position.y - group[i - 1].position.y < NODE_HEIGHT) {
+        hasOverlap = true;
+        break;
+      }
+    }
+    if (!hasOverlap) continue;
+
+    const startY = group[0].position.y;
+    for (let i = 0; i < group.length; i++) {
+      const idx = result.findIndex((n) => n.id === group[i].id);
+      if (idx === -1) continue;
+      result[idx] = {
+        ...result[idx],
+        position: { x: result[idx].position.x, y: startY + i * NODE_STRIDE },
+      };
+    }
+  }
+
+  return result;
+}
+
 function getPipeline(state: PipelineState, projectId: string): PipelineData {
   return state.pipelines[projectId] ?? EMPTY_PIPELINE;
 }
@@ -147,8 +190,14 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
     set({ loading: true });
     try {
       const dto = await apiLoadPipeline(projectId);
-      const nodes = dto.nodes.map(dtoToNode);
+      const rawNodes = dto.nodes.map(dtoToNode);
+      const nodes = fixOverlappingNodes(rawNodes);
       const edges = dto.edges.map(dtoToEdge);
+
+      const positionsChanged = rawNodes.some((n, i) =>
+        n.position.x !== nodes[i].position.x || n.position.y !== nodes[i].position.y,
+      );
+
       set((state) => ({
         loading: false,
         pipelines: {
@@ -156,6 +205,10 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
           [projectId]: { nodes, edges, selectedNodeId: null },
         },
       }));
+
+      if (positionsChanged) {
+        debouncedSave(projectId, () => getPipeline(get(), projectId));
+      }
     } catch {
       set((state) => ({
         loading: false,

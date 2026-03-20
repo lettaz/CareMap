@@ -10,12 +10,18 @@ export default function ProjectShell() {
   const location = useLocation();
   const projects = useProjectStore((s) => s.projects);
   const loading = useProjectStore((s) => s.loading);
+  const hydrated = useProjectStore((s) => s.hydrated);
+  const fetchProjects = useProjectStore((s) => s.fetchProjects);
   const setActiveProject = useProjectStore((s) => s.setActiveProject);
   const ensurePipeline = usePipelineStore((s) => s.ensurePipeline);
   const ensureDashboard = useDashboardStore((s) => s.ensureDashboard);
 
   const projectExists = projects.some((p) => p.id === projectId);
   const isCanvasRoute = location.pathname.endsWith("/canvas");
+
+  useEffect(() => {
+    if (!hydrated && !loading) fetchProjects();
+  }, [hydrated, loading, fetchProjects]);
 
   useEffect(() => {
     if (!projectId || !projectExists) return;
@@ -25,9 +31,9 @@ export default function ProjectShell() {
     return () => setActiveProject(null);
   }, [projectId, projectExists, setActiveProject, ensurePipeline, ensureDashboard]);
 
-  if (loading) return null;
+  if (!hydrated || loading) return null;
 
-  if (!projectId || (!projectExists && !loading)) {
+  if (!projectId || !projectExists) {
     return <Navigate to="/" replace />;
   }
 

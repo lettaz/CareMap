@@ -16,7 +16,7 @@ interface RightPanelProps {
 }
 
 const DEFAULT_WIDTHS = {
-  agent: 420,
+  agent: 480,
   source: 580,
   transform: 560,
   default: 420,

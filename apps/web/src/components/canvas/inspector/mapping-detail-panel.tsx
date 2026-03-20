@@ -42,9 +42,9 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
-    Promise.all([fetchMappings(projectId), fetchActiveSchema(projectId)])
-      .then(([m, s]) => {
-        setMappings(m);
+    Promise.all([fetchMappings(projectId, { page: 1, pageSize: 100 }), fetchActiveSchema(projectId)])
+      .then(([res, s]) => {
+        setMappings(res.data);
         setSchema(s);
       })
       .catch(() => {})
@@ -73,8 +73,8 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
     try {
       const { accepted } = await bulkAcceptMappings(projectId);
       if (accepted > 0) {
-        const refreshed = await fetchMappings(projectId);
-        setMappings(refreshed);
+        const res = await fetchMappings(projectId, { page: 1, pageSize: 100 });
+        setMappings(res.data);
       }
     } finally {
       setBulkLoading(false);
