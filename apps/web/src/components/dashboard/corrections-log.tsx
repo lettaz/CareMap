@@ -10,6 +10,8 @@ import {
   History,
 } from "lucide-react";
 import type { CorrectionEntry, DashboardSourceSummary } from "@/lib/types";
+import { usePagination } from "@/hooks/use-pagination";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { cn } from "@/lib/utils";
 
 const ACTION_CONFIG: Record<
@@ -59,6 +61,8 @@ export function CorrectionsLog({ corrections, sources }: CorrectionsLogProps) {
   const sorted = [...corrections].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
+  const pg = usePagination(sorted.length, { defaultPageSize: 10 });
+  const pageEntries = sorted.slice((pg.page - 1) * pg.pageSize, pg.page * pg.pageSize);
 
   return (
     <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface shadow-[var(--cm-shadow-surface)]">
@@ -91,7 +95,7 @@ export function CorrectionsLog({ corrections, sources }: CorrectionsLogProps) {
             {/* Timeline line */}
             <div className="absolute left-[1.625rem] top-0 h-full w-px bg-cm-border-subtle" />
 
-            {sorted.map((entry) => {
+            {pageEntries.map((entry) => {
               const config = ACTION_CONFIG[entry.action];
               const ActionIcon = config.icon;
               const filename = entry.sourceFileId
@@ -165,6 +169,20 @@ export function CorrectionsLog({ corrections, sources }: CorrectionsLogProps) {
           </div>
         )}
       </div>
+
+      {sorted.length > pg.pageSize && (
+        <PaginationBar
+          page={pg.page}
+          totalPages={pg.totalPages}
+          total={sorted.length}
+          pageSize={pg.pageSize}
+          hasNext={pg.hasNext}
+          hasPrev={pg.hasPrev}
+          onNext={pg.nextPage}
+          onPrev={pg.prevPage}
+          onPageSizeChange={pg.setPageSize}
+        />
+      )}
     </div>
   );
 }

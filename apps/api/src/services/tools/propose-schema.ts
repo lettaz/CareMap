@@ -3,6 +3,7 @@ import { z } from "zod";
 import { generateText } from "ai";
 import { getModel } from "../../config/ai.js";
 import { supabase } from "../../config/supabase.js";
+import { logCorrection } from "../corrections.js";
 
 const SCHEMA_PROPOSAL_PROMPT = `You are a data modeling assistant for CareMap, a data harmonization platform.
 
@@ -153,6 +154,13 @@ export const proposeTargetSchemaTool = tool({
         };
       }
 
+      await logCorrection({
+        projectId,
+        action: "schema_update",
+        description: `Proposed target schema v${nextVersion} with ${result.tables.length} tables: ${result.tables.map((t) => t.name).join(", ")}`,
+        newValue: `v${nextVersion}`,
+      });
+
       return {
         success: true,
         schemaId: schema!.id,
@@ -163,7 +171,7 @@ export const proposeTargetSchemaTool = tool({
           name: t.name,
           description: t.description,
           columnCount: t.columns.length,
-          columns: t.columns.map((c) => c.name),
+          columns: t.columns,
         })),
         reasoning: result.reasoning ?? null,
       };

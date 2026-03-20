@@ -73,12 +73,14 @@ async function executeOnce(
 
   try {
     if (fileUrls.length > 0) {
-      const downloadCode = fileUrls
-        .map(
+      const downloadCode = [
+        'import os, urllib.request',
+        'os.makedirs("/tmp/data", exist_ok=True)',
+        ...fileUrls.map(
           (f) =>
-            `import urllib.request; urllib.request.urlretrieve("${f.url}", "/tmp/${f.path.split("/").pop()}")`,
-        )
-        .join("\n");
+            `urllib.request.urlretrieve("${f.url}", "/tmp/data/${f.path.split("/").pop()}")`,
+        ),
+      ].join("\n");
       await sandbox.runCode(downloadCode, { timeoutMs: timeout });
     }
 

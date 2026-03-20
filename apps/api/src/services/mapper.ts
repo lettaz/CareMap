@@ -65,12 +65,30 @@ interface SourceColumnContext {
   sampleValues: unknown[];
 }
 
+async function getProjectThresholds(projectId: string) {
+  const { data } = await supabase
+    .from("projects")
+    .select("settings")
+    .eq("id", projectId)
+    .single();
+
+  const settings = (data?.settings as Record<string, unknown>) ?? {};
+  const thresholds = (settings.thresholds as Record<string, number>) ?? {};
+  return {
+    autoAccept: thresholds.autoAccept ?? 0.85,
+    review: thresholds.review ?? 0.6,
+  };
+}
+
 export async function generateMappings(
   projectId: string,
   sourceFileId: string,
   columnProfiles: SourceColumnContext[],
 ): Promise<FieldMappingRow[]> {
-  const schemaText = await getProjectSchema(projectId);
+  const [schemaText, thresholds] = await Promise.all([
+    getProjectSchema(projectId),
+    getProjectThresholds(projectId),
+  ]);
 
   const { text: content } = await generateText({
     model: getModel(),
@@ -88,20 +106,25 @@ export async function generateMappings(
 
   const parsed = JSON.parse(content) as { mappings?: MappingResult[] } | MappingResult[];
   const mappings: MappingResult[] = Array.isArray(parsed) ? parsed : (parsed.mappings ?? []);
+  const now = new Date().toISOString();
 
-  const inserts: FieldMappingInsert[] = mappings.map((m) => ({
-    project_id: projectId,
-    source_file_id: sourceFileId,
-    source_column: m.sourceColumn,
-    target_table: m.targetTable,
-    target_column: m.targetColumn,
-    confidence: m.confidence,
-    reasoning: m.reasoning,
-    transformation: m.transformation ?? null,
-    status: m.confidence >= 0.85 ? "accepted" : "pending",
-    reviewed_by: m.confidence >= 0.85 ? "auto" : null,
-    reviewed_at: m.confidence >= 0.85 ? new Date().toISOString() : null,
-  }));
+  const inserts: FieldMappingInsert[] = mappings.map((m) => {
+    const accepted = m.confidence >= thresholds.autoAccept;
+    const pending = m.confidence >= thresholds.review;
+    return {
+      project_id: projectId,
+      source_file_id: sourceFileId,
+      source_column: m.sourceColumn,
+      target_table: m.targetTable,
+      target_column: m.targetColumn,
+      confidence: m.confidence,
+      reasoning: m.reasoning,
+      transformation: m.transformation ?? null,
+      status: accepted ? "accepted" : pending ? "pending" : "rejected",
+      reviewed_by: accepted ? "auto" : null,
+      reviewed_at: accepted ? now : null,
+    };
+  });
 
   const { data, error } = await supabase.from("field_mappings").insert(inserts).select();
   if (error) throw new Error(`Failed to save mappings: ${error.message}`);
@@ -136,13 +159,21 @@ export async function updateMappingStatus(
   return data as FieldMappingRow;
 }
 
-export async function getMappingsByProject(projectId: string): Promise<FieldMappingRow[]> {
-  const { data, error } = await supabase
+export async function getMappingsByProject(
+  projectId: string,
+  opts?: { from?: number; to?: number },
+): Promise<{ data: FieldMappingRow[]; total: number }> {
+  let query = supabase
     .from("field_mappings")
-    .select()
+    .select("*", { count: "exact" })
     .eq("project_id", projectId)
     .order("confidence", { ascending: false });
 
+  if (opts?.from !== undefined && opts?.to !== undefined) {
+    query = query.range(opts.from, opts.to);
+  }
+
+  const { data, error, count } = await query;
   if (error) throw new Error(`Failed to fetch mappings: ${error.message}`);
-  return data as FieldMappingRow[];
+  return { data: data as FieldMappingRow[], total: count ?? 0 };
 }

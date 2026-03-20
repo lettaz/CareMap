@@ -3,6 +3,7 @@ import { z } from "zod";
 import { supabase } from "../config/supabase.js";
 import { createProjectSchema } from "../lib/types/api.js";
 import { NotFoundError, ValidationError } from "../lib/errors.js";
+import { deleteFiles, listFiles } from "../services/storage.js";
 
 const updateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -87,6 +88,16 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
 
   app.delete<{ Params: { id: string } }>("/:id", async (request, reply) => {
     const { id } = request.params;
+
+    const storageDirs = [`raw/${id}`, `cleaned/${id}`, `harmonized/${id}`, `exports/${id}`];
+    const cleanupPromises = storageDirs.map(async (dir) => {
+      try {
+        const files = await listFiles(dir);
+        if (files.length > 0) await deleteFiles(files);
+      } catch { /* best-effort cleanup */ }
+    });
+    await Promise.allSettled(cleanupPromises);
+
     const { error } = await supabase.from("projects").delete().eq("id", id);
     if (error) throw new NotFoundError("Project", id);
     return reply.status(204).send();

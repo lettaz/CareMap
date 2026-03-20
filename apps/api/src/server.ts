@@ -26,7 +26,11 @@ const app = Fastify({
   },
 });
 
-await app.register(cors, { origin: env.CORS_ORIGIN, credentials: true });
+await app.register(cors, {
+  origin: env.CORS_ORIGIN,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+});
 await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 
 app.setErrorHandler((error, _request, reply) => {

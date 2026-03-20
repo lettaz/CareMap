@@ -111,4 +111,27 @@ export interface DashboardResponse {
     mappedFields: number;
     unmappedFields: number;
   }>;
+  completeness: {
+    fields: string[];
+    buckets: string[];
+    values: Record<string, Record<string, number>>;
+  } | null;
+  lineage: Array<{
+    metricLabel: string;
+    sourceFileId: string;
+    sourceColumn: string;
+    transformations: string[];
+    targetField: string;
+  }>;
+  corrections: Array<{
+    id: string;
+    timestamp: string;
+    action: string;
+    description: string;
+    sourceFileId?: string;
+    field?: string;
+    previousValue?: string;
+    newValue?: string;
+    appliedBy: string;
+  }>;
 }

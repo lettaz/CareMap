@@ -1,4 +1,4 @@
-import { streamText, ToolLoopAgent, stepCountIs, createAgentUIStreamResponse } from "ai";
+import { ToolLoopAgent, stepCountIs, createAgentUIStreamResponse } from "ai";
 import type { UIMessage } from "ai";
 import { getModel } from "../config/ai.js";
 import { allTools } from "./tools/index.js";
@@ -35,7 +35,7 @@ When the user asks questions about their data, requests insights, or wants visua
 - When returning tabular results, present them clearly with column context.
 - When results lend themselves to visualization (trends, distributions, comparisons), call generate_artifact to produce a chart.
 - When the user asks for a download or export, call export_data to produce a CSV with a download link.
-- Always include the generated code (SQL or Python) in your response so the user sees exactly what ran.
+- **Do NOT repeat SQL or Python code in your text response.** The UI already shows the executed code inside the tool execution card. Focus your response on interpreting results and delivering insights.
 
 ### Predictions and ML
 - When the user asks for predictions, forecasts, risk scoring, or correlation analysis, use run_script.
@@ -60,6 +60,8 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
   const sections = [BASE_SYSTEM_PROMPT];
 
   sections.push(`\n## Project: ${ctx.projectName}`);
+  sections.push(`Project ID: ${projectId}`);
+  sections.push("IMPORTANT: Always use this exact Project ID when calling tools that require a projectId parameter. Never guess or fabricate a UUID.");
   if (ctx.projectDescription) {
     sections.push(`Description: ${ctx.projectDescription}`);
   }
@@ -158,18 +160,4 @@ export async function createAgentStreamResponse(opts: AgentStreamOptions): Promi
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function createSimpleStream(opts: AgentStreamOptions): Promise<any> {
-  const systemPrompt = await buildSystemPrompt(opts.projectId);
-
-  const result = streamText({
-    model: getModel(),
-    system: systemPrompt,
-    messages: opts.messages,
-    tools: allTools,
-    stopWhen: stepCountIs(20),
-    temperature: 0.3,
-  });
-
-  return result;
-}
+export { buildSystemPrompt };

@@ -4,13 +4,26 @@ import { getModel } from "../../config/ai.js";
 import { generateText } from "ai";
 
 export const generateArtifactTool = tool({
-  description: "Given query results, generate a Recharts-compatible chart specification (type, title, axes, data). Returns a structured artifact for the frontend to render inline.",
+  description:
+    "Generate a Recharts-compatible chart from query results. " +
+    "You MUST pass the queryResults array from a prior run_query / run_script call. " +
+    "If you don't have results yet, run the query first, then call this tool with the returned rows.",
   inputSchema: z.object({
-    queryResults: z.array(z.record(z.unknown())),
+    queryResults: z.array(z.record(z.unknown())).default([]),
     userQuestion: z.string(),
     columns: z.array(z.string()).optional(),
   }),
   execute: async ({ queryResults, userQuestion, columns }) => {
+    if (queryResults.length === 0) {
+      return {
+        type: "error",
+        success: false,
+        error: "queryResults is empty. Run a query first (run_query or run_script), then pass the result rows to generate_artifact.",
+        retryable: true,
+        suggestion: "Call run_query to get data, then call generate_artifact with the returned rows as queryResults.",
+      };
+    }
+
     const { text } = await generateText({
       model: getModel(),
       messages: [

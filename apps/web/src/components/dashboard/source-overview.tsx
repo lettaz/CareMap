@@ -1,6 +1,8 @@
 import { FileSpreadsheet, FileText, FileType2, File } from "lucide-react";
 import type { DashboardSourceSummary } from "@/lib/types";
 import { StatusDot } from "@/components/shared/status-dot";
+import { usePagination } from "@/hooks/use-pagination";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { cn } from "@/lib/utils";
 
 const FILE_ICON: Record<string, typeof FileText> = {
@@ -26,6 +28,9 @@ interface SourceOverviewProps {
 }
 
 export function SourceOverview({ sources }: SourceOverviewProps) {
+  const pg = usePagination(sources.length, { defaultPageSize: 10 });
+  const pageSources = sources.slice((pg.page - 1) * pg.pageSize, pg.page * pg.pageSize);
+
   return (
     <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface shadow-[var(--cm-shadow-surface)]">
       <div className="border-b border-cm-border-primary px-5 py-3.5">
@@ -57,7 +62,7 @@ export function SourceOverview({ sources }: SourceOverviewProps) {
               </tr>
             </thead>
             <tbody>
-              {sources.map((src, i) => {
+              {pageSources.map((src, i) => {
                 const Icon = FILE_ICON[src.fileType] ?? File;
                 const total = src.mappedFields + src.unmappedFields;
                 const coverage = total > 0 ? Math.round((src.mappedFields / total) * 100) : 0;
@@ -112,6 +117,20 @@ export function SourceOverview({ sources }: SourceOverviewProps) {
               })}
             </tbody>
           </table>
+
+          {sources.length > pg.pageSize && (
+            <PaginationBar
+              page={pg.page}
+              totalPages={pg.totalPages}
+              total={sources.length}
+              pageSize={pg.pageSize}
+              hasNext={pg.hasNext}
+              hasPrev={pg.hasPrev}
+              onNext={pg.nextPage}
+              onPrev={pg.prevPage}
+              onPageSizeChange={pg.setPageSize}
+            />
+          )}
         </div>
       )}
     </div>

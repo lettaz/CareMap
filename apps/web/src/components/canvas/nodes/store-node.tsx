@@ -22,16 +22,22 @@ export function StoreNode({ id, data }: NodeProps<PipelineNode>) {
   const hasData = data.rowCount != null && data.rowCount > 0;
   const hasIssues = (data.issueCount ?? 0) > 0;
   const isWarningOrError = data.status === "warning" || data.status === "error";
+  const formatLabel = data.format ?? data.targetTable ?? "canonical";
 
   const description =
     data.description ??
-    (data.targetTable
-      ? `Writing to ${data.targetTable}`
-      : "Persists harmonized data to canonical tables");
+    (hasData
+      ? `Writing validated data to canonical Supabase tables`
+      : data.targetTable
+        ? `Writing to ${data.targetTable}`
+        : "Persists harmonized data to canonical tables");
 
   return (
     <div className="relative w-[260px] rounded-lg border border-cm-border-primary bg-white shadow-sm transition-shadow hover:shadow-md">
-      <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg bg-cm-node-sink" />
+      <div className={cn(
+        "absolute left-0 top-0 bottom-0 w-1 rounded-l-lg bg-cm-node-sink",
+        hasData && "w-1.5",
+      )} />
 
       {(hasIssues || isWarningOrError) && (
         <div className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-red-500">
@@ -42,17 +48,14 @@ export function StoreNode({ id, data }: NodeProps<PipelineNode>) {
       )}
 
       <div className="p-3 pl-4">
-        {/* Badge + Status */}
         <div className="mb-2 flex items-center justify-between">
           <span className="rounded-full bg-cm-node-sink/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cm-node-sink">
             Store
           </span>
           <div className="flex items-center gap-1.5">
-            {data.targetTable && (
-              <span className="rounded bg-cm-bg-elevated px-1.5 py-0.5 font-mono text-[10px] font-medium text-cm-text-secondary">
-                {data.targetTable}
-              </span>
-            )}
+            <span className="rounded border border-cm-border-primary bg-cm-bg-elevated px-1.5 py-0.5 text-[10px] font-medium text-cm-text-secondary">
+              {formatLabel}
+            </span>
             <div
               className={cn(
                 "h-2 w-2 rounded-full",
@@ -66,7 +69,6 @@ export function StoreNode({ id, data }: NodeProps<PipelineNode>) {
           </div>
         </div>
 
-        {/* Icon + Label */}
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-cm-node-sink/10">
             <Database className="h-3.5 w-3.5 text-cm-node-sink" />
@@ -74,12 +76,10 @@ export function StoreNode({ id, data }: NodeProps<PipelineNode>) {
           <NodeLabelInput rename={rename} />
         </div>
 
-        {/* Description */}
         <p className="mt-1.5 text-[11px] leading-snug text-cm-text-tertiary">
           {description}
         </p>
 
-        {/* Stats footer */}
         <div className="mt-2 border-t border-cm-border-subtle pt-2">
           {hasData ? (
             <div className="flex items-center justify-between">

@@ -1,23 +1,30 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { X } from "lucide-react";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useActiveProject } from "@/hooks/use-active-project";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { AgentPanel } from "./agent-panel";
 import { SourceDetailPanel } from "@/components/canvas/inspector/source-detail-panel";
 import { MappingDetailPanel } from "@/components/canvas/inspector/mapping-detail-panel";
-import { NodeInspector } from "@/components/canvas/inspector/node-inspector";
+import { HarmonizeDetailPanel } from "@/components/canvas/inspector/harmonize-detail-panel";
+import { QualityDetailPanel } from "@/components/canvas/inspector/quality-detail-panel";
+import { ExportDetailPanel } from "@/components/canvas/inspector/export-detail-panel";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface RightPanelProps {
   isCanvasRoute: boolean;
 }
 
-const DEFAULT_WIDTHS = {
-  agent: 420,
+const DEFAULT_WIDTHS: Record<string, number> = {
+  agent: 480,
   source: 580,
   transform: 560,
-  default: 420,
-} as const;
+  harmonize: 480,
+  quality: 420,
+  sink: 420,
+};
 
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 900;
@@ -25,6 +32,8 @@ const MAX_WIDTH = 900;
 export function RightPanel({ isCanvasRoute }: RightPanelProps) {
   const { projectId } = useActiveProject();
   const isPanelOpen = useAgentStore((s) => s.isPanelOpen);
+  const togglePanel = useAgentStore((s) => s.togglePanel);
+  const isMobile = useIsMobile();
 
   const selectedNodeId = usePipelineStore((s) =>
     projectId ? s.pipelines[projectId]?.selectedNodeId : null
@@ -40,11 +49,7 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
   const baseWidth = !isPanelOpen
     ? 0
     : showInspector
-      ? nodeCategory === "source"
-        ? DEFAULT_WIDTHS.source
-        : nodeCategory === "transform"
-          ? DEFAULT_WIDTHS.transform
-          : DEFAULT_WIDTHS.default
+      ? DEFAULT_WIDTHS[nodeCategory ?? ""] ?? 420
       : DEFAULT_WIDTHS.agent;
 
   const [panelWidth, setPanelWidth] = useState(baseWidth);
@@ -57,13 +62,14 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
   }, [baseWidth]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if (isMobile) return;
     e.preventDefault();
     isDragging.current = true;
     startX.current = e.clientX;
     startWidth.current = panelWidth;
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
-  }, [panelWidth]);
+  }, [panelWidth, isMobile]);
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent) {
@@ -90,6 +96,48 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
 
   if (!isPanelOpen) return null;
 
+  const panelContent = showInspector ? (
+    nodeCategory === "source" ? (
+      <SourceDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
+    ) : nodeCategory === "transform" ? (
+      <MappingDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
+    ) : nodeCategory === "harmonize" ? (
+      <HarmonizeDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
+    ) : nodeCategory === "quality" ? (
+      <QualityDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
+    ) : nodeCategory === "sink" ? (
+      <ExportDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
+    ) : null
+  ) : (
+    <AgentPanel />
+  );
+
+  if (isMobile) {
+    return (
+      <>
+        {/* Backdrop */}
+        <div
+          className="fixed inset-0 z-40 bg-black/40 animate-in fade-in"
+          onClick={togglePanel}
+        />
+        {/* Full-screen panel */}
+        <div className="fixed inset-x-0 bottom-0 top-12 z-50 flex flex-col bg-cm-bg-surface animate-in slide-in-from-bottom-4 duration-200">
+          <div className="flex items-center justify-between border-b border-cm-border-primary px-3 py-2 shrink-0">
+            <p className="text-xs font-medium text-cm-text-secondary uppercase tracking-wider">
+              {showInspector ? "Inspector" : "CareMap AI"}
+            </p>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={togglePanel}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            {panelContent}
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
     <div
       className="relative flex h-full shrink-0 overflow-hidden border-l border-cm-border-primary bg-cm-bg-surface"
@@ -105,17 +153,7 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
       />
 
       <div className="flex h-full w-full flex-col overflow-hidden">
-        {showInspector ? (
-          nodeCategory === "source" ? (
-            <SourceDetailPanel nodeId={selectedNode!.id} />
-          ) : nodeCategory === "transform" ? (
-            <MappingDetailPanel nodeId={selectedNode!.id} />
-          ) : (
-            <NodeInspector nodeId={selectedNode!.id} />
-          )
-        ) : (
-          <AgentPanel />
-        )}
+        {panelContent}
       </div>
     </div>
   );

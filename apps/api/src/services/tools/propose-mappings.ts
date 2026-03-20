@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { generateMappings } from "../mapper.js";
 import { supabase } from "../../config/supabase.js";
+import { logBulkCorrections } from "../corrections.js";
 
 export const proposeMappingsTool = tool({
   description: "Given cleaned source profiles and the canonical clinical schema, propose source-to-target column mappings with confidence scores, reasoning, and transformation rules.",
@@ -42,6 +43,19 @@ export const proposeMappingsTool = tool({
         };
       }
 
+      const autoAccepted = allMappings.filter((m) => m.status === "accepted");
+      if (autoAccepted.length > 0) {
+        await logBulkCorrections(
+          autoAccepted.map((m) => ({
+            projectId,
+            action: "mapping_change" as const,
+            description: `Auto-accepted mapping: ${m.source_column} → ${m.target_table}.${m.target_column} (${Math.round(m.confidence * 100)}% confidence)`,
+            field: m.source_column,
+            newValue: `${m.target_table}.${m.target_column}`,
+          })),
+        );
+      }
+
       return {
         success: true,
         mappings: allMappings.map((m) => ({
@@ -54,7 +68,7 @@ export const proposeMappingsTool = tool({
           status: m.status,
         })),
         totalMappings: allMappings.length,
-        autoAccepted: allMappings.filter((m) => m.status === "accepted").length,
+        autoAccepted: autoAccepted.length,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

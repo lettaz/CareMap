@@ -10,10 +10,14 @@ import {
   ChevronDown,
   ChevronUp,
   Table2,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
 import type { QualityAlert, DashboardSourceSummary, AffectedRecord } from "@/lib/types";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useActiveProject } from "@/hooks/use-active-project";
+import { usePagination } from "@/hooks/use-pagination";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -261,7 +265,10 @@ interface AnomalyFeedProps {
 }
 
 export function AnomalyFeed({ alerts, sources }: AnomalyFeedProps) {
+  const [checking, setChecking] = useState(false);
   const sourceMap = new Map(sources.map((s) => [s.id, s.filename]));
+  const { projectId } = useActiveProject();
+  const runCheck = useDashboardStore((s) => s.runQualityCheck);
 
   const sorted = [...alerts].sort((a, b) => {
     const bySeverity = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
@@ -270,6 +277,18 @@ export function AnomalyFeed({ alerts, sources }: AnomalyFeedProps) {
   });
 
   const openCount = sorted.filter((a) => !a.acknowledged).length;
+  const pg = usePagination(sorted.length, { defaultPageSize: 10 });
+  const pageAlerts = sorted.slice((pg.page - 1) * pg.pageSize, pg.page * pg.pageSize);
+
+  const handleRunCheck = async () => {
+    if (!projectId || checking) return;
+    setChecking(true);
+    try {
+      await runCheck(projectId);
+    } finally {
+      setChecking(false);
+    }
+  };
 
   return (
     <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface shadow-[var(--cm-shadow-surface)]">
@@ -285,11 +304,27 @@ export function AnomalyFeed({ alerts, sources }: AnomalyFeedProps) {
                 : "All alerts acknowledged"}
             </p>
           </div>
-          {openCount > 0 && (
-            <span className="rounded-full bg-cm-error-subtle px-2 py-0.5 text-xs font-medium tabular-nums text-cm-error">
-              {openCount}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRunCheck}
+              disabled={checking}
+              className="h-7 gap-1.5 text-xs"
+            >
+              {checking ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+              {checking ? "Scanning..." : "Run Check"}
+            </Button>
+            {openCount > 0 && (
+              <span className="rounded-full bg-cm-error-subtle px-2 py-0.5 text-xs font-medium tabular-nums text-cm-error">
+                {openCount}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -303,7 +338,7 @@ export function AnomalyFeed({ alerts, sources }: AnomalyFeedProps) {
               </p>
             </div>
           ) : (
-            sorted.map((alert) => (
+            pageAlerts.map((alert) => (
               <AlertCard
                 key={alert.id}
                 alert={alert}
@@ -317,6 +352,20 @@ export function AnomalyFeed({ alerts, sources }: AnomalyFeedProps) {
           )}
         </div>
       </div>
+
+      {sorted.length > pg.pageSize && (
+        <PaginationBar
+          page={pg.page}
+          totalPages={pg.totalPages}
+          total={sorted.length}
+          pageSize={pg.pageSize}
+          hasNext={pg.hasNext}
+          hasPrev={pg.hasPrev}
+          onNext={pg.nextPage}
+          onPrev={pg.prevPage}
+          onPageSizeChange={pg.setPageSize}
+        />
+      )}
     </div>
   );
 }

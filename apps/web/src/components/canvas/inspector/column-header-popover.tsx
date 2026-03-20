@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { SourcePreviewColumn } from "@/lib/mock-data";
+import type { SourcePreviewColumn } from "@/lib/types";
 
 interface ColumnHeaderPopoverProps {
   column: SourcePreviewColumn;

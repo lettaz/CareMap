@@ -1,18 +1,53 @@
-import { MOCK_PROFILES } from "@/lib/mock-data";
+import { useState, useEffect } from "react";
+import { Loader2 } from "lucide-react";
 import { ConfidenceBar } from "@/components/shared/confidence-bar";
+import { fetchProfile, type ColumnProfileDTO } from "@/lib/api/ingest";
+import type { ColumnProfile } from "@/lib/types";
 
 interface ProfileTabProps {
   sourceFileId: string;
 }
 
+function dtoToProfile(dto: ColumnProfileDTO): ColumnProfile {
+  return {
+    id: dto.id,
+    sourceFileId: dto.source_file_id,
+    columnName: dto.column_name,
+    inferredType: dto.inferred_type as ColumnProfile["inferredType"],
+    semanticLabel: dto.semantic_label,
+    domain: dto.domain,
+    confidence: dto.confidence,
+    sampleValues: dto.sample_values as (string | number)[],
+    qualityFlags: dto.quality_flags,
+    userCorrected: false,
+  };
+}
+
 export function ProfileTab({ sourceFileId }: ProfileTabProps) {
-  const fileId = sourceFileId.startsWith("source-") ? "src-001" : sourceFileId;
-  const profiles = MOCK_PROFILES[fileId] ?? MOCK_PROFILES["src-001"] ?? [];
+  const [profiles, setProfiles] = useState<ColumnProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!sourceFileId) return;
+    setLoading(true);
+    fetchProfile(sourceFileId)
+      .then((dtos) => setProfiles(dtos.map(dtoToProfile)))
+      .catch(() => setProfiles([]))
+      .finally(() => setLoading(false));
+  }, [sourceFileId]);
+
+  if (loading) {
+    return (
+      <div className="mt-6 flex items-center justify-center text-cm-text-tertiary">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
+  }
 
   if (profiles.length === 0) {
     return (
       <p className="mt-3 text-sm text-cm-text-tertiary">
-        No profile data available. Upload a file and run the Builder Agent.
+        No profile data available. Upload a file first.
       </p>
     );
   }

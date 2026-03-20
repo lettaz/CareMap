@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { supabase } from "../config/supabase.js";
 import { parseCsv, parseExcel, profileColumns, saveProfiles } from "../services/profiler.js";
-import { uploadFile, rawPath } from "../services/storage.js";
+import { uploadFile, rawPath, downloadFile, deleteFiles, cleanedPath } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
 import { logStep } from "../lib/step-logger.js";
+import { env } from "../config/env.js";
 
 function sseWrite(raw: { write: (chunk: string) => boolean }, type: string, data: unknown) {
   raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
@@ -36,6 +37,8 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      "Access-Control-Allow-Origin": env.CORS_ORIGIN,
+      "Access-Control-Allow-Credentials": "true",
     });
 
     // ── Step 1: Parse file ──
@@ -156,7 +159,17 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       await saveStep.finish({ savedCount: profile.columns.length });
       sseWrite(reply.raw, "step", { stepType: "save_profiles", status: "completed", output: { savedCount: profile.columns.length } });
 
-      sseWrite(reply.raw, "profile_complete", profile.summary);
+      const criticalFlags = ["high_null_rate", "duplicate_rows", "data_type_mismatch"];
+      const avgConfidence = profile.columns.reduce((sum, c) => sum + c.confidence, 0) / (profile.columns.length || 1);
+      const criticalFlagCount = profile.columns.filter(
+        (c) => c.qualityFlags.some((f) => criticalFlags.includes(f)),
+      ).length;
+
+      sseWrite(reply.raw, "profile_complete", {
+        ...profile.summary,
+        avgConfidence,
+        criticalFlagCount,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Profiling failed";
       sseWrite(reply.raw, "step", { stepType: "error", status: "error", output: { message } });
@@ -168,6 +181,39 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
 
     reply.raw.end();
   });
+
+  // ── Get sample rows for a source file (paginated) ──
+  app.get<{ Params: { sourceFileId: string }; Querystring: { page?: string; pageSize?: string } }>(
+    "/:sourceFileId/sample-rows",
+    async (request) => {
+      const { sourceFileId } = request.params;
+      const page = Math.max(1, Number(request.query.page) || 1);
+      const pageSize = Math.min(50, Math.max(1, Number(request.query.pageSize) || 20));
+
+      const { data: file, error } = await supabase
+        .from("source_files")
+        .select("project_id, file_type, storage_path")
+        .eq("id", sourceFileId)
+        .single();
+
+      if (error || !file) throw new Error("Source file not found");
+      if (!file.storage_path) return { data: [], total: 0, page, pageSize };
+
+      const buffer = await downloadFile(file.storage_path);
+      const isExcel = file.file_type === "xlsx" || file.file_type === "xls";
+      const isTsv = file.file_type === "tsv";
+
+      const parsed = isExcel
+        ? parseExcel(buffer)
+        : parseCsv(buffer.toString("utf-8"), isTsv ? "\t" : undefined);
+
+      const total = parsed.rows.length;
+      const from = (page - 1) * pageSize;
+      const sliced = parsed.rows.slice(from, from + pageSize);
+
+      return { data: sliced, total, page, pageSize };
+    },
+  );
 
   // ── Get profile for a source file ──
   app.get<{ Params: { sourceFileId: string } }>("/:sourceFileId/profile", async (request) => {
@@ -255,6 +301,33 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
 
       if (error) throw new Error(`Failed to update profile: ${error.message}`);
       return data;
+    },
+  );
+
+  // ── Delete a source file and its storage/profiles ──
+  app.delete<{ Params: { sourceFileId: string } }>(
+    "/:sourceFileId",
+    async (request, reply) => {
+      const { sourceFileId } = request.params;
+
+      const { data: file, error: fetchErr } = await supabase
+        .from("source_files")
+        .select("id, project_id, storage_path, cleaned_path")
+        .eq("id", sourceFileId)
+        .single();
+
+      if (fetchErr || !file) return reply.status(404).send({ error: "NOT_FOUND", message: "Source file not found" });
+
+      const storagePaths = [file.storage_path, file.cleaned_path].filter(Boolean) as string[];
+      if (storagePaths.length > 0) {
+        try { await deleteFiles(storagePaths); } catch { /* best-effort */ }
+      }
+
+      await supabase.from("source_profiles").delete().eq("source_file_id", sourceFileId);
+      await supabase.from("field_mappings").delete().eq("source_file_id", sourceFileId);
+      await supabase.from("source_files").delete().eq("id", sourceFileId);
+
+      return reply.status(204).send();
     },
   );
 };

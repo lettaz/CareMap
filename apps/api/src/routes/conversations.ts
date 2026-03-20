@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { supabase } from "../config/supabase.js";
 import { ValidationError } from "../lib/errors.js";
+import { parsePagination, paginationRange, buildPaginatedResponse } from "../lib/pagination.js";
 
 const approvalSchema = z.object({
   toolCallId: z.string(),
@@ -40,19 +41,22 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(201).send(data);
   });
 
-  app.get<{ Params: { conversationId: string } }>(
+  app.get<{ Params: { conversationId: string }; Querystring: { page?: string; pageSize?: string } }>(
     "/conversations/:conversationId/messages",
     async (request) => {
       const { conversationId } = request.params;
+      const pagination = parsePagination(request.query as Record<string, unknown>);
+      const { from, to } = paginationRange(pagination);
 
-      const { data, error } = await supabase
+      const { data, error, count } = await supabase
         .from("conversation_messages")
-        .select()
+        .select("*", { count: "exact" })
         .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: true })
+        .range(from, to);
 
       if (error) throw new Error(`Failed to fetch messages: ${error.message}`);
-      return data ?? [];
+      return buildPaginatedResponse(data ?? [], count ?? 0, pagination);
     },
   );
 

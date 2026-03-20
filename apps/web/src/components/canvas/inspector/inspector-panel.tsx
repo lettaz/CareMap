@@ -8,6 +8,7 @@ import { ProfileTab } from "./profile-tab";
 import { MappingsTab } from "./mappings-tab";
 import { ConfirmedTab } from "./confirmed-tab";
 import { StoreStatusTab } from "./store-status-tab";
+import { QualityCheckTab } from "./quality-check-tab";
 
 interface InspectorPanelProps {
   nodeId: string;
@@ -71,11 +72,7 @@ export function InspectorPanel({ nodeId }: InspectorPanelProps) {
       )}
 
       {category === "quality" && (
-        <div className="p-4">
-          <p className="text-sm text-cm-text-secondary">
-            Quality checks will run automatically when the pipeline executes. No configuration needed.
-          </p>
-        </div>
+        <QualityCheckTab nodeId={nodeId} />
       )}
 
       {category === "sink" && (

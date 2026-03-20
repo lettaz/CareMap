@@ -15,7 +15,6 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <ProjectsPage /> },
-      { path: "settings", element: <SettingsPage /> },
       {
         path: "projects/:projectId",
         element: <ProjectShell />,
@@ -23,6 +22,7 @@ const router = createBrowserRouter([
           { index: true, element: <Navigate to="canvas" replace /> },
           { path: "canvas", element: <CanvasPage /> },
           { path: "dashboard", element: <DashboardPage /> },
+          { path: "settings", element: <SettingsPage /> },
         ],
       },
     ],
