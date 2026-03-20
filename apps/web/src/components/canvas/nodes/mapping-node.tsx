@@ -10,7 +10,7 @@ export function MappingNode({ id, data }: NodeProps<PipelineNode>) {
   const rename = useNodeRename(id, data.label);
   const mapped = data.mappedCount ?? 0;
   const total = data.totalFields ?? data.columnCount ?? 0;
-  const progressPct = total > 0 ? Math.round((mapped / total) * 100) : 0;
+  const progressPct = total > 0 ? Math.min(100, Math.round((mapped / total) * 100)) : 0;
   const hasIssues = (data.issueCount ?? 0) > 0;
   const isWarningOrError = data.status === "warning" || data.status === "error";
 

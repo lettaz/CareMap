@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   ShieldCheck,
   Play,
@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { useActiveProject } from "@/hooks/use-active-project";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { triggerPipeline } from "@/lib/api/pipeline";
-import { runQualityCheck } from "@/lib/api/dashboard";
+import { runQualityCheck, fetchAlertsPaginated } from "@/lib/api/dashboard";
 import { cn } from "@/lib/utils";
 
 interface QualityCheckTabProps {
@@ -74,6 +74,41 @@ export function QualityCheckTab({ nodeId }: QualityCheckTabProps) {
     }
   }, [projectId, nodeId, updateNodeData]);
 
+  const refreshAlertsFromDb = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const res = await fetchAlertsPaginated(projectId, { page: 1, pageSize: 200 });
+      const alerts = res.data;
+
+      const critical = alerts.filter((a) => a.severity === "critical").length;
+      const warnings = alerts.filter((a) => a.severity === "warning").length;
+      const info = alerts.filter((a) => a.severity === "info" || (a.severity !== "critical" && a.severity !== "warning")).length;
+
+      setResult({
+        persisted: alerts.length,
+        alerts: alerts.map((a) => ({
+          id: a.id,
+          severity: a.severity,
+          summary: a.summary,
+          affectedCount: a.affectedCount,
+        })),
+      });
+
+      if (updateNodeData) {
+        updateNodeData(projectId, nodeId, {
+          status: critical > 0 ? "error" : warnings > 0 ? "warning" : "ready",
+          checksFail: critical,
+          checksWarn: warnings,
+          checksPass: info + (alerts.length === 0 ? 1 : 0),
+          issueCount: critical + warnings,
+          description: alerts.length > 0
+            ? `Found ${alerts.length} issue${alerts.length !== 1 ? "s" : ""} across quality checks`
+            : "All quality checks passed",
+        });
+      }
+    } catch { /* non-fatal */ }
+  }, [projectId, nodeId, updateNodeData]);
+
   const handleDeepCheck = useCallback(async () => {
     if (!projectId) return;
     setAgentRunning(true);
@@ -91,17 +126,27 @@ export function QualityCheckTab({ nodeId }: QualityCheckTabProps) {
         body,
       });
 
-      if (response.ok) {
-        if (updateNodeData) {
-          updateNodeData(projectId, nodeId, { status: "ready" });
+      if (response.ok && response.body) {
+        const reader = response.body.getReader();
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
         }
       }
+
+      await refreshAlertsFromDb();
     } catch {
-      // Agent stream errors are non-fatal
+      if (updateNodeData) {
+        updateNodeData(projectId, nodeId, { status: "error" });
+      }
     } finally {
       setAgentRunning(false);
     }
-  }, [projectId, nodeId, updateNodeData]);
+  }, [projectId, nodeId, updateNodeData, refreshAlertsFromDb]);
+
+  useEffect(() => {
+    refreshAlertsFromDb();
+  }, [refreshAlertsFromDb]);
 
   const pass = node?.data.checksPass ?? 0;
   const warn = node?.data.checksWarn ?? 0;

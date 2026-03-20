@@ -105,10 +105,14 @@ export async function generateMappings(
   if (!content) throw new AIServiceError("Empty response from mapping model");
 
   const parsed = JSON.parse(content) as { mappings?: MappingResult[] } | MappingResult[];
-  const mappings: MappingResult[] = Array.isArray(parsed) ? parsed : (parsed.mappings ?? []);
+  const rawMappings: MappingResult[] = Array.isArray(parsed) ? parsed : (parsed.mappings ?? []);
   const now = new Date().toISOString();
 
-  const inserts: FieldMappingInsert[] = mappings.map((m) => {
+  const validMappings = rawMappings.filter(
+    (m) => m.sourceColumn && m.targetTable && m.targetColumn,
+  );
+
+  const inserts: FieldMappingInsert[] = validMappings.map((m) => {
     const accepted = m.confidence >= thresholds.autoAccept;
     const pending = m.confidence >= thresholds.review;
     return {
@@ -117,8 +121,8 @@ export async function generateMappings(
       source_column: m.sourceColumn,
       target_table: m.targetTable,
       target_column: m.targetColumn,
-      confidence: m.confidence,
-      reasoning: m.reasoning,
+      confidence: m.confidence ?? 0,
+      reasoning: m.reasoning ?? "",
       transformation: m.transformation ?? null,
       status: accepted ? "accepted" : pending ? "pending" : "rejected",
       reviewed_by: accepted ? "auto" : null,

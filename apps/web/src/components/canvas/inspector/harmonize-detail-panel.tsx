@@ -14,7 +14,6 @@ import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useActiveProject } from "@/hooks/use-active-project";
 import { EditableLabel } from "@/components/shared/editable-label";
-import { triggerPipeline } from "@/lib/api/pipeline";
 import { fetchHarmonizedTables, type HarmonizedTableDTO } from "@/lib/api/harmonize";
 import { fetchMappings } from "@/lib/api/mappings";
 
@@ -32,21 +31,28 @@ export function HarmonizeDetailPanel({ nodeId }: HarmonizeDetailPanelProps) {
   const openPanel = useAgentStore((s) => s.openPanel);
 
   const [tables, setTables] = useState<HarmonizedTableDTO[]>([]);
-  const [acceptedCount, setAcceptedCount] = useState(0);
+  const [acceptedMappingIds, setAcceptedMappingIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const acceptedCount = acceptedMappingIds.length;
+
   const loadData = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId) return { tables: [] as HarmonizedTableDTO[], ids: [] as string[] };
     try {
       const [harmonized, mappings] = await Promise.all([
         fetchHarmonizedTables(projectId),
-        fetchMappings(projectId, { page: 1, pageSize: 200 }),
+        fetchMappings(projectId, { page: 1, pageSize: 500 }),
       ]);
-      setTables(harmonized.tables ?? []);
-      setAcceptedCount(mappings.data.filter((m) => m.status === "accepted").length);
-    } catch { /* silent */ }
+      const freshTables = harmonized.tables ?? [];
+      const ids = mappings.data.filter((m) => m.status === "accepted").map((m) => m.id);
+      setTables(freshTables);
+      setAcceptedMappingIds(ids);
+      return { tables: freshTables, ids };
+    } catch {
+      return { tables: [] as HarmonizedTableDTO[], ids: [] as string[] };
+    }
   }, [projectId]);
 
   useEffect(() => {
@@ -55,23 +61,22 @@ export function HarmonizeDetailPanel({ nodeId }: HarmonizeDetailPanelProps) {
   }, [loadData]);
 
   const handleRun = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || acceptedMappingIds.length === 0) return;
     setRunning(true);
     setError(null);
     updateNodeData(projectId, nodeId, { status: "running" });
 
     try {
-      const { url, body } = triggerPipeline(projectId, nodeId, "harmonize_requested");
       const apiBase = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
-      const response = await fetch(`${apiBase}${url}`, {
+      const response = await fetch(`${apiBase}/api/harmonize/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body,
+        body: JSON.stringify({ projectId, mappingIds: acceptedMappingIds }),
       });
 
       if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new Error(body?.message ?? `Server returned ${response.status}`);
+        const errBody = await response.json().catch(() => null);
+        throw new Error(errBody?.message ?? `Server returned ${response.status}`);
       }
 
       const reader = response.body?.getReader();
@@ -81,25 +86,18 @@ export function HarmonizeDetailPanel({ nodeId }: HarmonizeDetailPanelProps) {
           const { done, value } = await reader.read();
           if (done) break;
           const text = decoder.decode(value, { stream: true });
-          if (text.includes('"type":"complete"')) {
-            break;
-          }
           if (text.includes('"type":"error"')) {
             const match = text.match(/"message":"([^"]+)"/);
-            setError(match?.[1] ?? "Harmonization failed");
-            updateNodeData(projectId, nodeId, { status: "error" });
-            setRunning(false);
-            return;
+            throw new Error(match?.[1] ?? "Harmonization failed");
           }
         }
       }
 
-      await loadData();
-      const freshTables = tables;
-      const totalRows = freshTables.reduce((sum, t) => sum + t.rows, 0);
+      const fresh = await loadData();
+      const totalRows = fresh.tables.reduce((sum, t) => sum + t.rows, 0);
       updateNodeData(projectId, nodeId, {
-        status: "ready",
-        tableCount: freshTables.length,
+        status: fresh.tables.length > 0 ? "ready" : "idle",
+        tableCount: fresh.tables.length,
         harmonizedRowCount: totalRows,
       });
     } catch (err) {
@@ -108,7 +106,7 @@ export function HarmonizeDetailPanel({ nodeId }: HarmonizeDetailPanelProps) {
     } finally {
       setRunning(false);
     }
-  }, [projectId, nodeId, updateNodeData, loadData, tables]);
+  }, [projectId, nodeId, updateNodeData, loadData, acceptedMappingIds]);
 
   const handleViewChat = useCallback(() => {
     if (!projectId) return;

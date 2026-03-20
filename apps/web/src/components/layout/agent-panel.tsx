@@ -176,13 +176,15 @@ function persistMessages(projectId: string | undefined, messages: UIMessage[]) {
   } catch { /* quota exceeded — silent */ }
 }
 
+const EMPTY_NODES: never[] = [];
+
 export function AgentPanel() {
   const { projectId } = useParams<{ projectId: string }>();
   const nodeContext = useAgentStore((s) => s.nodeContext);
   const setNodeContext = useAgentStore((s) => s.setNodeContext);
   const openPanel = useAgentStore((s) => s.openPanel);
   const pipelineNodes = usePipelineStore((s) =>
-    projectId ? s.pipelines[projectId]?.nodes ?? [] : [],
+    projectId ? s.pipelines[projectId]?.nodes ?? EMPTY_NODES : EMPTY_NODES,
   );
 
   const [draft, setDraft] = useState("");

@@ -73,7 +73,7 @@ export async function updateSemanticLayer(projectId: string): Promise<void> {
         project_id: projectId,
         entity_name: table.name,
         description: `Harmonized ${table.name} table with ${table.rows} rows`,
-        parquet_path: `harmonized/${projectId}/${table.name}.parquet`,
+        parquet_path: `harmonized/${projectId}/${table.name}.csv`,
         row_count: table.rows,
         created_from: [],
       })

@@ -78,16 +78,12 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
 
   const isRunning = node?.data.status === "running";
 
-  const hasIncomingEdges = pipeline?.edges.some((e) => e.target === nodeId) ?? false;
-
   const mappings = useMemo(() => {
-    if (connectedSourceFileIds.size === 0) {
-      return hasIncomingEdges ? [] : allMappings;
-    }
+    if (connectedSourceFileIds.size === 0) return [];
     return allMappings.filter(
       (m) => !m.source_file_id || connectedSourceFileIds.has(m.source_file_id),
     );
-  }, [allMappings, connectedSourceFileIds, hasIncomingEdges]);
+  }, [allMappings, connectedSourceFileIds]);
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -106,14 +102,18 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
     const csfi = connectedSourceFileIdsRef.current;
     const scopedMappings = csfi.size > 0
       ? allMappings.filter((m) => !m.source_file_id || csfi.has(m.source_file_id))
-      : allMappings;
+      : [];
     const totalFields = schema?.tables?.reduce((sum, t) => sum + t.columns.length, 0) ?? 0;
-    const acceptedCount = scopedMappings.filter((m) => m.status === "accepted").length;
+    const coveredColumns = new Set(
+      scopedMappings
+        .filter((m) => m.status === "accepted")
+        .map((m) => `${m.target_table}::${m.target_column}`),
+    );
     updateNodeData(projectId, nodeId, {
       schemaStatus: (schema?.status as PipelineNodeData["schemaStatus"]) ?? undefined,
       schemaTableCount: schema?.tables?.length ?? 0,
       totalFields,
-      mappedCount: acceptedCount,
+      mappedCount: coveredColumns.size,
       sourceCount: csfi.size || undefined,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,11 +199,21 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
 
   if (!node || !projectId) return null;
 
-  const accepted = mappings.filter((m) => m.status === "accepted").length;
-  const rejected = mappings.filter((m) => m.status === "rejected").length;
   const pending = mappings.filter((m) => m.status === "pending").length;
-  const derived = mappings.filter((m) => m.source_column === "__derived__" || !m.source_file_id).length;
-  const mapped = accepted - derived;
+  const rejected = mappings.filter((m) => m.status === "rejected").length;
+  const acceptedMappings = mappings.filter((m) => m.status === "accepted");
+  const derivedSet = new Set(
+    acceptedMappings
+      .filter((m) => m.source_column === "__derived__" || !m.source_file_id)
+      .map((m) => `${m.target_table}::${m.target_column}`),
+  );
+  const mappedSet = new Set(
+    acceptedMappings
+      .filter((m) => m.source_file_id && m.source_column !== "__derived__")
+      .map((m) => `${m.target_table}::${m.target_column}`),
+  );
+  const mapped = mappedSet.size;
+  const derived = derivedSet.size;
 
   const tableGroups = new Map<string, FieldMappingDTO[]>();
   for (const m of mappings) {

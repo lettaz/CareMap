@@ -25,11 +25,17 @@ import pandas as pd
 import json, os
 
 alerts = []
+checked = 0
 for f in os.listdir("/tmp/data"):
-    if not f.endswith(".parquet"):
+    if f.endswith(".parquet"):
+        table_name = f.replace(".parquet", "")
+        df = pd.read_parquet(f"/tmp/data/{f}")
+    elif f.endswith(".csv"):
+        table_name = f.replace(".csv", "")
+        df = pd.read_csv(f"/tmp/data/{f}")
+    else:
         continue
-    table_name = f.replace(".parquet", "")
-    df = pd.read_parquet(f"/tmp/data/{f}")
+    checked += 1
 
     for col in df.columns:
         null_rate = df[col].isnull().mean()
@@ -48,7 +54,7 @@ for f in os.listdir("/tmp/data"):
             "affectedCount": int(dupes)
         })
 
-print(json.dumps({"alerts": alerts, "tablesChecked": len([f for f in os.listdir("/tmp/data") if f.endswith(".parquet")])}))
+print(json.dumps({"alerts": alerts, "tablesChecked": checked}))
 `;
 
     const result = await executeWithFileUpload(pythonCode, storagePaths, { timeoutMs: 30_000 });

@@ -1,5 +1,8 @@
 {
   "name": "caremap",
   "private": true,
-  "workspaces": ["apps/*"]
+  "workspaces": ["apps/*"],
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "msw"]
+  }
 }

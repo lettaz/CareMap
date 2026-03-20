@@ -1,9 +1,8 @@
 import { supabase } from "../config/supabase.js";
-import { executeInSandbox, getSignedFileUrls } from "./sandbox.js";
-import { harmonizedTablePath } from "./storage.js";
+import { createSandbox, getSignedFileUrls } from "./sandbox.js";
+import { harmonizedTablePath, manifestPath, uploadFile } from "./storage.js";
 import { updateSemanticLayer } from "./semantic.js";
 import type { FieldMappingRow } from "../lib/types/database.js";
-import type { SandboxOptions } from "./sandbox.js";
 
 export interface HarmonizeResult {
   tables: Array<{ name: string; rows: number; columns: string[] }>;
@@ -190,59 +189,75 @@ export async function harmonize(
   const preamble = preambleLines.join("\n");
 
   const script = buildHarmonizationScript(mappings as FieldMappingRow[], sourceFileMap);
-
   const fullCode = `${preamble}\n\n${script}`;
 
-  const opts: SandboxOptions = { timeoutMs: 120_000, onStdout: onProgress };
-  const result = await executeInSandbox(fullCode, [], opts);
+  const sandbox = await createSandbox();
+  let stdout = "";
+  let stderr = "";
 
-  if (result.exitCode !== 0) {
-    const errDetail = result.stderr || result.stdout || "(no output captured)";
-    throw new Error(`Harmonization sandbox error (exit=${result.exitCode}, retries=${result.retryCount}): ${errDetail}`);
-  }
-
-  const manifestLine = result.stdout.split("\n").filter((l) => l.startsWith("{")).pop();
-
-  if (!manifestLine) {
-    throw new Error(
-      `Harmonization produced no output manifest. ` +
-      `stdout: ${result.stdout.slice(0, 500) || "(empty)"}. ` +
-      `stderr: ${result.stderr.slice(0, 500) || "(empty)"}`
-    );
-  }
-
-  let manifest: { tables: Array<{ name: string; rows: number; columns: string[] }> };
   try {
-    manifest = JSON.parse(manifestLine);
-  } catch {
-    throw new Error(`Harmonization manifest is malformed JSON: ${manifestLine.slice(0, 300)}`);
+    const execution = await sandbox.runCode(fullCode, {
+      timeoutMs: 120_000,
+      onStdout: (msg: { line?: string } | string) => {
+        const text = typeof msg === "string" ? msg : (msg?.line ?? String(msg));
+        stdout += text + "\n";
+        onProgress?.(text);
+      },
+      onStderr: (msg: { line?: string } | string) => {
+        const text = typeof msg === "string" ? msg : (msg?.line ?? String(msg));
+        stderr += text + "\n";
+      },
+    });
+
+    if (execution.error) {
+      const errDetail = `${execution.error.name}: ${execution.error.value}\n${execution.error.traceback ?? ""}`;
+      throw new Error(`Harmonization sandbox error: ${errDetail}`);
+    }
+
+    const manifestLine = stdout.split("\n").filter((l) => l.trim().startsWith("{")).pop();
+    if (!manifestLine) {
+      throw new Error(
+        `Harmonization produced no output manifest. stdout: ${stdout.slice(0, 500) || "(empty)"}. stderr: ${stderr.slice(0, 500) || "(empty)"}`,
+      );
+    }
+
+    let manifest: { tables: Array<{ name: string; rows: number; columns: string[] }> };
+    try {
+      manifest = JSON.parse(manifestLine);
+    } catch {
+      throw new Error(`Harmonization manifest is malformed JSON: ${manifestLine.slice(0, 300)}`);
+    }
+
+    if (!manifest.tables?.length) {
+      throw new Error(`Harmonization completed but produced zero tables. stdout: ${stdout.slice(0, 500)}`);
+    }
+
+    const emptyTables = manifest.tables.filter((t) => t.rows === 0);
+    if (emptyTables.length > 0) {
+      console.warn(`[harmonizer] Warning: tables with zero rows: ${emptyTables.map((t) => t.name).join(", ")}`);
+    }
+
+    const parquetPaths: string[] = [];
+    for (const table of manifest.tables) {
+      const csvBytes = await sandbox.files.read(`/tmp/harmonized/${table.name}.csv`);
+      const csvBuffer = typeof csvBytes === "string" ? Buffer.from(csvBytes, "utf-8") : Buffer.from(csvBytes);
+      const destPath = harmonizedTablePath(projectId, table.name);
+      await uploadFile(destPath, csvBuffer, "text/csv");
+      parquetPaths.push(destPath);
+    }
+
+    const manifestBytes = await sandbox.files.read("/tmp/harmonized/manifest.json");
+    const manifestBuffer = typeof manifestBytes === "string" ? Buffer.from(manifestBytes, "utf-8") : Buffer.from(manifestBytes);
+    await uploadFile(manifestPath(projectId), manifestBuffer, "application/json");
+
+    await updateSemanticLayer(projectId);
+
+    return {
+      tables: manifest.tables,
+      totalRecords: manifest.tables.reduce((sum, t) => sum + t.rows, 0),
+      parquetPaths,
+    };
+  } finally {
+    await sandbox.kill().catch(() => {});
   }
-
-  if (!manifest.tables?.length) {
-    throw new Error(
-      `Harmonization completed but produced zero tables. ` +
-      `This may indicate mapping/transformation issues. ` +
-      `stdout: ${result.stdout.slice(0, 500)}`
-    );
-  }
-
-  const emptyTables = manifest.tables.filter((t) => t.rows === 0);
-  if (emptyTables.length > 0) {
-    const names = emptyTables.map((t) => t.name).join(", ");
-    console.warn(`[harmonizer] Warning: tables with zero rows: ${names}`);
-  }
-
-  const parquetPaths: string[] = [];
-  for (const table of manifest.tables) {
-    const destPath = harmonizedTablePath(projectId, table.name);
-    parquetPaths.push(destPath);
-  }
-
-  await updateSemanticLayer(projectId);
-
-  return {
-    tables: manifest.tables,
-    totalRecords: manifest.tables.reduce((sum, t) => sum + t.rows, 0),
-    parquetPaths,
-  };
 }
