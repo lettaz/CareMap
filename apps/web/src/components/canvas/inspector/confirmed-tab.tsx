@@ -1,8 +1,49 @@
-import { Check } from "lucide-react";
-import { MOCK_MAPPINGS } from "@/lib/mock-data";
+import { useState, useEffect } from "react";
+import { Check, Loader2 } from "lucide-react";
+import { useActiveProject } from "@/hooks/use-active-project";
+import { fetchMappings, type FieldMappingDTO } from "@/lib/api/mappings";
+
+interface ConfirmedMapping {
+  id: string;
+  sourceColumn: string;
+  targetTable: string;
+  targetColumn: string;
+  confidence: number;
+}
 
 export function ConfirmedTab() {
-  const confirmed = MOCK_MAPPINGS.filter((m) => m.status === "accepted");
+  const { projectId } = useActiveProject();
+  const [confirmed, setConfirmed] = useState<ConfirmedMapping[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setLoading(true);
+    fetchMappings(projectId)
+      .then((dtos: FieldMappingDTO[]) =>
+        setConfirmed(
+          dtos
+            .filter((m) => m.status === "accepted")
+            .map((m) => ({
+              id: m.id,
+              sourceColumn: m.source_column,
+              targetTable: m.target_table,
+              targetColumn: m.target_column,
+              confidence: m.confidence,
+            })),
+        ),
+      )
+      .catch(() => setConfirmed([]))
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  if (loading) {
+    return (
+      <div className="mt-6 flex items-center justify-center text-cm-text-tertiary">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
+  }
 
   if (confirmed.length === 0) {
     return (
@@ -28,7 +69,7 @@ export function ConfirmedTab() {
               {mapping.sourceColumn}
             </p>
             <p className="text-[10px] text-cm-text-tertiary">
-              → {mapping.targetTable}.{mapping.targetColumn}
+              &rarr; {mapping.targetTable}.{mapping.targetColumn}
             </p>
           </div>
           <span className="text-[10px] text-cm-text-tertiary">

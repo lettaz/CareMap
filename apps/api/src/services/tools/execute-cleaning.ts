@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { executeCleaning, type CleaningAction } from "../cleaner.js";
 import { isYoloMode } from "../../lib/yolo.js";
+import { logBulkCorrections } from "../corrections.js";
 
 const cleaningActionSchema = z.object({
   column: z.string(),
@@ -21,6 +22,18 @@ export const executeCleaningTool = tool({
   execute: async ({ projectId, sourceFileId, actions }) => {
     try {
       const result = await executeCleaning(projectId, sourceFileId, actions as CleaningAction[]);
+
+      await logBulkCorrections(
+        actions.map((a) => ({
+          projectId,
+          action: "value_fix" as const,
+          description: `${a.action} on column "${a.column}": ${a.reason}`,
+          sourceFileId,
+          field: a.column,
+          appliedBy: "ai" as const,
+        })),
+      );
+
       return {
         success: true,
         ...result,

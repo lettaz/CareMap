@@ -1,5 +1,5 @@
 import { Sparkles, AlertTriangle, CheckCircle2 } from "lucide-react";
-import type { SourcePreview } from "@/lib/mock-data";
+import type { SourcePreview } from "@/lib/types";
 
 interface SourceSummaryBarProps {
   preview: SourcePreview;

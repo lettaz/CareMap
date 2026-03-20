@@ -1,5 +1,5 @@
 import { Sparkles } from "lucide-react";
-import type { SourcePreview } from "@/lib/mock-data";
+import type { SourcePreview } from "@/lib/types";
 
 interface SourceAiPromptsProps {
   preview: SourcePreview;

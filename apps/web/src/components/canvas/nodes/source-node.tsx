@@ -94,6 +94,10 @@ export function SourceNode({ id, data }: NodeProps<PipelineNode>) {
                 </span>
               )}
             </>
+          ) : data.status === "ready" ? (
+            <span className="text-[11px] text-emerald-600 font-medium">
+              Profiled
+            </span>
           ) : (
             <span className="text-[11px] italic text-cm-text-tertiary">
               Click to upload file

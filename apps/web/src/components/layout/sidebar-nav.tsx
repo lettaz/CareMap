@@ -39,6 +39,26 @@ function SidebarItem({ to, icon: Icon, label, matchEnd }: SidebarItemProps) {
   );
 }
 
+function BottomNavItem({ to, icon: Icon, label, matchEnd }: SidebarItemProps) {
+  return (
+    <NavLink
+      to={to}
+      end={matchEnd}
+      className={({ isActive }) =>
+        cn(
+          "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition-colors",
+          isActive
+            ? "text-cm-accent"
+            : "text-cm-text-tertiary",
+        )
+      }
+    >
+      <Icon className="size-5" />
+      <span>{label}</span>
+    </NavLink>
+  );
+}
+
 export function SidebarNav() {
   const { projectId } = useActiveProject();
   const location = useLocation();
@@ -47,34 +67,53 @@ export function SidebarNav() {
     projectId != null || location.pathname.startsWith("/projects/");
 
   return (
-    <nav className="flex w-14 shrink-0 flex-col items-center border-r border-cm-border-primary bg-cm-bg-surface py-3">
-      {/* ── Global: Home ── */}
-      <SidebarItem to="/" icon={FolderOpen} label="All Projects" matchEnd />
+    <>
+      {/* Desktop sidebar */}
+      <nav className="hidden md:flex w-14 shrink-0 flex-col items-center border-r border-cm-border-primary bg-cm-bg-surface py-3">
+        <SidebarItem to="/" icon={FolderOpen} label="All Projects" matchEnd />
 
-      {/* ── Project-contextual items ── */}
-      {isInsideProject && projectId && (
-        <>
-          <div className="mx-auto my-2 h-px w-6 bg-cm-border-primary" />
-          <div className="flex flex-col items-center gap-1">
-            <SidebarItem
+        {isInsideProject && projectId && (
+          <>
+            <div className="mx-auto my-2 h-px w-6 bg-cm-border-primary" />
+            <div className="flex flex-col items-center gap-1">
+              <SidebarItem
+                to={`/projects/${projectId}/canvas`}
+                icon={Workflow}
+                label="Canvas"
+              />
+              <SidebarItem
+                to={`/projects/${projectId}/dashboard`}
+                icon={LayoutDashboard}
+                label="Dashboard"
+              />
+            </div>
+          </>
+        )}
+
+        <div className="flex-1" />
+
+        <SidebarItem to="/settings" icon={Settings} label="Settings" />
+      </nav>
+
+      {/* Mobile bottom nav */}
+      <nav className="fixed bottom-0 inset-x-0 z-40 flex md:hidden border-t border-cm-border-primary bg-cm-bg-surface pb-[env(safe-area-inset-bottom)]">
+        <BottomNavItem to="/" icon={FolderOpen} label="Projects" matchEnd />
+        {isInsideProject && projectId && (
+          <>
+            <BottomNavItem
               to={`/projects/${projectId}/canvas`}
               icon={Workflow}
               label="Canvas"
             />
-            <SidebarItem
+            <BottomNavItem
               to={`/projects/${projectId}/dashboard`}
               icon={LayoutDashboard}
               label="Dashboard"
             />
-          </div>
-        </>
-      )}
-
-      {/* ── Spacer ── */}
-      <div className="flex-1" />
-
-      {/* ── Global: Settings (pinned to bottom) ── */}
-      <SidebarItem to="/settings" icon={Settings} label="Settings" />
-    </nav>
+          </>
+        )}
+        <BottomNavItem to="/settings" icon={Settings} label="Settings" />
+      </nav>
+    </>
   );
 }

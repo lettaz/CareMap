@@ -293,6 +293,30 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  settings?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SourcePreviewColumn {
+  name: string;
+  type: "string" | "number" | "date" | "code";
+  nullCount: number;
+  uniqueCount: number;
+  min?: number;
+  max?: number;
+  mean?: number;
+  topValues?: string[];
+}
+
+export interface SourcePreview {
+  sourceFileId: string;
+  filename: string;
+  totalRows: number;
+  totalColumns: number;
+  columns: SourcePreviewColumn[];
+  rows: Record<string, string | number | null>[];
+  aiSummary: string;
+  issueCount: number;
+  completeness: number;
 }

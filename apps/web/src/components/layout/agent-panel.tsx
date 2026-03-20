@@ -1,120 +1,285 @@
-import { useState, useRef } from "react";
-import { Sparkles, ChevronDown, Bot, Cpu, Zap } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Sparkles, Square, SendHorizonal } from "lucide-react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import type { UIMessage } from "ai";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useActiveProject } from "@/hooks/use-active-project";
-import { MessageThread } from "@/components/agent/message-thread";
-import { AgentInput } from "@/components/agent/agent-input";
-import { cn } from "@/lib/utils";
+import { apiUrl } from "@/lib/api/client";
+import { Button } from "@/components/ui/button";
+import {
+  Conversation,
+  ConversationContent,
+} from "@/components/ai-elements/conversation";
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
+import {
+  Suggestions,
+  Suggestion,
+} from "@/components/ai-elements/suggestion";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import { ToolResultRenderer } from "@/components/agent/tool-result-renderer";
 
-const AGENT_COLOR = "#4F46E5";
+const DESTRUCTIVE_TOOLS = new Set([
+  "execute_cleaning",
+  "run_harmonization",
+  "confirm_mappings",
+  "run_script",
+]);
 
-const MODES = [
-  { id: "agent", label: "Agent", icon: Bot },
-  { id: "ask", label: "Ask", icon: Sparkles },
-] as const;
+const TOOL_LABELS: Record<string, string> = {
+  parse_file: "Parsing file",
+  profile_columns: "Profiling columns",
+  suggest_cleaning: "Suggesting cleaning plan",
+  execute_cleaning: "Executing cleaning",
+  propose_target_schema: "Proposing schema",
+  propose_mappings: "Proposing mappings",
+  confirm_mappings: "Confirming mappings",
+  run_harmonization: "Running harmonization",
+  run_query: "Querying data",
+  run_script: "Running script",
+  generate_artifact: "Generating artifact",
+  explain_lineage: "Explaining lineage",
+  run_quality_check: "Running quality check",
+  update_semantic_layer: "Updating semantic layer",
+  export_data: "Exporting data",
+};
 
-const MODELS = [
-  { id: "caremap-pro", label: "CareMap Pro", icon: Zap },
-  { id: "caremap-fast", label: "CareMap Fast", icon: Cpu },
-] as const;
-
-type ModeId = (typeof MODES)[number]["id"];
-type ModelId = (typeof MODELS)[number]["id"];
+const SUGGESTIONS = [
+  "Profile a source file",
+  "Map fields to canonical schema",
+  "Show data quality issues",
+  "Query harmonized data",
+];
 
 export function AgentPanel() {
   const { projectId } = useActiveProject();
-  const session = useAgentStore((s) => (projectId ? s.sessions[projectId] : null));
-  const { addMessage } = useAgentStore();
+  const nodeContext = useAgentStore((s) => s.nodeContext);
+  const setNodeContext = useAgentStore((s) => s.setNodeContext);
+  const [draft, setDraft] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const [activeMode, setActiveMode] = useState<ModeId>("agent");
-  const [activeModel, setActiveModel] = useState<ModelId>("caremap-pro");
-  const [showModeMenu, setShowModeMenu] = useState(false);
-  const [showModelMenu, setShowModelMenu] = useState(false);
+  const chat = useChat({
+    transport: new DefaultChatTransport({
+      api: apiUrl("/api/chat"),
+      body: { projectId },
+    }),
+    onError: (error) => {
+      console.error("Chat error:", error);
+    },
+  });
 
-  const inputRef = useRef<{ setDraft: (text: string) => void }>(null);
+  const { messages, sendMessage, status, stop, addToolApprovalResponse } = chat;
 
-  const messages = session?.messages ?? [];
+  useEffect(() => {
+    if (nodeContext && projectId) {
+      sendMessage({ text: `Tell me about node "${nodeContext.label}" (${nodeContext.nodeId})` });
+      setNodeContext(null);
+    }
+  }, [nodeContext, projectId, sendMessage, setNodeContext]);
+
+  const handleSend = useCallback(() => {
+    if (!draft.trim()) return;
+    sendMessage({ text: draft.trim() });
+    setDraft("");
+  }, [draft, sendMessage]);
+
+  const handleSuggestionClick = useCallback(
+    (suggestion: string) => {
+      sendMessage({ text: suggestion });
+    },
+    [sendMessage],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    },
+    [handleSend],
+  );
+
+  const isStreaming = status === "streaming" || status === "submitted";
   const hasMessages = messages.length > 0;
-
-  const currentMode = MODES.find((m) => m.id === activeMode)!;
-  const currentModel = MODELS.find((m) => m.id === activeModel)!;
-
-  function handleSend(text: string) {
-    if (!projectId) return;
-    addMessage(projectId, {
-      id: `msg-${Date.now()}`,
-      role: "user",
-      content: text,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  function handleSuggestionClick(prompt: string) {
-    inputRef.current?.setDraft(prompt);
-  }
 
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden bg-cm-bg-app">
-      {/* Conversation / empty state */}
       {hasMessages ? (
-        <MessageThread messages={messages} agentColor={AGENT_COLOR} />
+        <Conversation className="flex-1">
+          <ConversationContent className="gap-4 p-3">
+            {messages.map((msg) => (
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                onApprove={(id) => addToolApprovalResponse({ id, approved: true })}
+                onReject={(id) => addToolApprovalResponse({ id, approved: false })}
+              />
+            ))}
+            {isStreaming && (
+              <div className="flex items-center gap-2 px-1">
+                <Shimmer duration={1.5}>Thinking...</Shimmer>
+              </div>
+            )}
+          </ConversationContent>
+        </Conversation>
       ) : (
         <AgentEmptyState onSuggestionClick={handleSuggestionClick} />
       )}
 
-      {/* Bottom: Input + selectors */}
-      <div className="shrink-0 border-t border-cm-border-subtle px-3 pt-2.5 pb-2 space-y-1.5">
-        <AgentInput
-          ref={inputRef}
-          placeholder="Ask anything about your data..."
-          onSend={handleSend}
-        />
+      <div className="shrink-0 border-t border-cm-border-subtle px-3 pt-2 pb-2 space-y-2">
+        {hasMessages && !isStreaming && (
+          <Suggestions className="pb-1">
+            {SUGGESTIONS.map((s) => (
+              <Suggestion key={s} suggestion={s} onClick={handleSuggestionClick} className="text-xs" />
+            ))}
+          </Suggestions>
+        )}
 
-        <div className="flex items-center gap-1">
-          <SelectorButton
-            mode={currentMode}
-            isOpen={showModeMenu}
-            onToggle={() => {
-              setShowModeMenu((p) => !p);
-              setShowModelMenu(false);
-            }}
-            items={MODES}
-            activeId={activeMode}
-            onSelect={(id) => {
-              setActiveMode(id as ModeId);
-              setShowModeMenu(false);
-            }}
-            onClose={() => setShowModeMenu(false)}
+        <div className="relative flex items-end rounded-lg border border-cm-border-primary bg-cm-bg-surface">
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask anything about your data..."
+            rows={1}
+            className="w-full resize-none bg-transparent px-3 py-2.5 pr-10 text-sm text-cm-text-primary placeholder:text-cm-text-tertiary outline-none"
           />
-          <SelectorButton
-            mode={currentModel}
-            isOpen={showModelMenu}
-            onToggle={() => {
-              setShowModelMenu((p) => !p);
-              setShowModeMenu(false);
-            }}
-            items={MODELS}
-            activeId={activeModel}
-            onSelect={(id) => {
-              setActiveModel(id as ModelId);
-              setShowModelMenu(false);
-            }}
-            onClose={() => setShowModelMenu(false)}
-          />
+          <div className="absolute right-1.5 bottom-1.5">
+            {isStreaming ? (
+              <Button variant="ghost" size="icon" onClick={stop} className="h-7 w-7">
+                <Square className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                onClick={handleSend}
+                disabled={!draft.trim()}
+                className="h-7 w-7 bg-cm-accent text-white hover:bg-cm-accent-hover disabled:opacity-40"
+              >
+                <SendHorizonal className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </aside>
   );
 }
 
-/* ─── Empty state ─── */
+interface ChatMessageProps {
+  message: UIMessage;
+  onApprove: (toolCallId: string) => void;
+  onReject: (toolCallId: string) => void;
+}
+
+function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
+  return (
+    <Message from={message.role}>
+      {message.parts.map((part, i) => {
+        if (part.type === "text") {
+          if (!part.text) return null;
+          if (message.role === "user") {
+            return (
+              <MessageContent key={i}>
+                <p>{part.text}</p>
+              </MessageContent>
+            );
+          }
+          return (
+            <MessageContent key={i}>
+              <MessageResponse>{part.text}</MessageResponse>
+            </MessageContent>
+          );
+        }
+
+        if (part.type === "reasoning") {
+          return null;
+        }
+
+        if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
+          const toolPart = part as {
+            type: string;
+            toolCallId: string;
+            toolName?: string;
+            state: string;
+            input?: unknown;
+            output?: unknown;
+            errorText?: string;
+          };
+
+          const toolName = toolPart.toolName ?? toolPart.type.replace("tool-", "");
+          const label = TOOL_LABELS[toolName] ?? toolName;
+          const isDestructive = DESTRUCTIVE_TOOLS.has(toolName);
+
+          if (isDestructive && toolPart.state === "approval-requested") {
+            return (
+              <div key={i} className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
+                <p className="font-medium text-amber-800">
+                  Approve <strong>{label}</strong>?
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => onReject(toolPart.toolCallId)}
+                  >
+                    Reject
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs bg-cm-accent text-white hover:bg-cm-accent-hover"
+                    onClick={() => onApprove(toolPart.toolCallId)}
+                  >
+                    Approve
+                  </Button>
+                </div>
+              </div>
+            );
+          }
+
+          if (toolPart.state === "output-available" && toolPart.output != null) {
+            return (
+              <ToolResultRenderer key={i} toolName={toolName} output={toolPart.output} />
+            );
+          }
+
+          const statusColor = toolPart.state === "output-error"
+            ? "text-red-600"
+            : toolPart.state === "output-available"
+              ? "text-green-600"
+              : "text-cm-text-tertiary";
+
+          return (
+            <div key={i} className="flex items-center gap-2 text-xs py-1">
+              <div className={`h-1.5 w-1.5 rounded-full ${
+                toolPart.state === "output-error" ? "bg-red-500"
+                : toolPart.state === "output-available" ? "bg-green-500"
+                : "bg-cm-accent animate-pulse"
+              }`} />
+              <span className={statusColor}>{label}</span>
+            </div>
+          );
+        }
+
+        return null;
+      })}
+    </Message>
+  );
+}
 
 function AgentEmptyState({ onSuggestionClick }: { onSuggestionClick: (text: string) => void }) {
   const suggestions = [
-    { label: "Profile a source file", prompt: "Profile the care_assessments.csv file and show me the data quality" },
+    { label: "Profile a source file", prompt: "Profile the uploaded source file and show me the data quality" },
     { label: "Map to canonical schema", prompt: "Map the uploaded source columns to our canonical schema" },
     { label: "Check data quality", prompt: "Show me all data quality issues across uploaded sources" },
-    { label: "Explain an anomaly", prompt: "Explain the CRP anomaly spike in the lab results" },
+    { label: "Query harmonized data", prompt: "Query the harmonized data and show me a summary" },
   ];
 
   return (
@@ -144,61 +309,6 @@ function AgentEmptyState({ onSuggestionClick }: { onSuggestionClick: (text: stri
           </button>
         ))}
       </div>
-    </div>
-  );
-}
-
-/* ─── Selector button with dropdown ─── */
-
-interface SelectorButtonProps {
-  mode: { id: string; label: string; icon: React.ComponentType<{ className?: string }> };
-  isOpen: boolean;
-  onToggle: () => void;
-  items: readonly { id: string; label: string; icon: React.ComponentType<{ className?: string }> }[];
-  activeId: string;
-  onSelect: (id: string) => void;
-  onClose: () => void;
-}
-
-function SelectorButton({ mode, isOpen, onToggle, items, activeId, onSelect, onClose }: SelectorButtonProps) {
-  const Icon = mode.icon;
-
-  return (
-    <div className="relative">
-      <button
-        onClick={onToggle}
-        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-cm-text-secondary hover:bg-cm-bg-elevated transition-colors"
-      >
-        <Icon className="h-3 w-3" />
-        {mode.label}
-        <ChevronDown className="h-3 w-3 text-cm-text-tertiary" />
-      </button>
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={onClose} />
-          <div className="absolute left-0 bottom-full z-40 mb-1 w-40 rounded-lg border border-cm-border-primary bg-white p-1 shadow-lg">
-            {items.map((item) => {
-              const ItemIcon = item.icon;
-              const isActive = item.id === activeId;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onSelect(item.id)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
-                    isActive
-                      ? "bg-cm-accent-subtle text-cm-accent font-medium"
-                      : "text-cm-text-secondary hover:bg-cm-bg-elevated"
-                  )}
-                >
-                  <ItemIcon className="h-3 w-3" />
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
     </div>
   );
 }

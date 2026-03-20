@@ -174,12 +174,37 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  *:hover {
+    scrollbar-color: var(--cm-border-strong) transparent;
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
   }
   html {
     @apply font-sans;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 9999px;
+    transition: background 0.2s;
+  }
+  *:hover > ::-webkit-scrollbar-thumb,
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--cm-border-strong);
+  }
+  ::-webkit-scrollbar-thumb:active {
+    background: var(--cm-text-tertiary);
   }
 }
 

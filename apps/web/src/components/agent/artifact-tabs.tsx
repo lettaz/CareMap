@@ -154,12 +154,10 @@ function ChartContent({ spec, queryText }: { spec: ChartSpec; queryText?: string
   function handlePin() {
     if (!projectId) return;
     pinWidget(projectId, {
-      id: `widget-${Date.now()}`,
       title: spec.title,
       queryText: queryText ?? spec.title,
-      sqlQuery: "",
+      queryCode: "",
       chartSpec: spec,
-      pinnedAt: new Date().toISOString(),
     });
     setPinned(true);
     setTimeout(() => setPinned(false), 3000);

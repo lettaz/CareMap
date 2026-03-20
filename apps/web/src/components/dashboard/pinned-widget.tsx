@@ -63,15 +63,20 @@ export function PinnedWidgetCard({ widget }: { widget: PinnedWidgetType }) {
 
   const lastRefreshed = widget.lastRefreshedAt ?? widget.pinnedAt;
 
+  const loadDashboard = useDashboardStore((s) => s.loadDashboard);
+
   function handleSaveTitle() {
     setIsEditing(false);
-    // When backend is connected, call an API to update the widget title
   }
 
-  function handleRefresh() {
+  async function handleRefresh() {
+    if (!projectId) return;
     setRefreshing(true);
-    // When backend is connected, re-run widget.sqlQuery and update chartSpec
-    setTimeout(() => setRefreshing(false), 1500);
+    try {
+      await loadDashboard(projectId);
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   return (

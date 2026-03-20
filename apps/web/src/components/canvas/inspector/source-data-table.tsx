@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SourcePreview, SourcePreviewColumn } from "@/lib/mock-data";
+import type { SourcePreview, SourcePreviewColumn } from "@/lib/types";
 import { ColumnHeaderPopover } from "./column-header-popover";
 import { cn } from "@/lib/utils";
 

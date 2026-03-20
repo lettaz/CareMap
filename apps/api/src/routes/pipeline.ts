@@ -14,6 +14,7 @@ const triggerSchema = z.object({
     "sources_connected",
     "harmonize_requested",
     "export_requested",
+    "quality_check_requested",
   ]),
   context: z.record(z.unknown()).optional(),
 });
@@ -164,6 +165,28 @@ export const pipelineRoutes: FastifyPluginAsync = async (app) => {
           `Available harmonized tables: ${JSON.stringify(tables)}. ` +
           `Desired format: ${format}. ` +
           `Read the harmonized data using run_query or run_script, then use export_data with format="${format}" to create a downloadable file.`;
+        break;
+      }
+
+      case "quality_check_requested": {
+        const tables = await listHarmonizedTables(projectId);
+        const sourceFileIds = await resolveConnectedSourceFileIds(nodeId);
+
+        if (tables.length > 0) {
+          userMessage =
+            `Project ID: ${projectId}. The user triggered a quality check from node ${nodeId}. ` +
+            `Please run run_quality_check to scan all harmonized tables for null rates, duplicates, and range violations. ` +
+            `Harmonized tables: ${JSON.stringify(tables)}.`;
+        } else if (sourceFileIds.length > 0) {
+          userMessage =
+            `Project ID: ${projectId}. The user triggered a quality check from node ${nodeId}. ` +
+            `No harmonized tables exist yet, but source files are connected. ` +
+            `Please check the source profiles for quality issues. Source file IDs: ${JSON.stringify(sourceFileIds)}`;
+        } else {
+          userMessage =
+            `Project ID: ${projectId}. The user triggered a quality check from node ${nodeId}. ` +
+            `Please run run_quality_check to scan all available data for quality issues.`;
+        }
         break;
       }
     }
