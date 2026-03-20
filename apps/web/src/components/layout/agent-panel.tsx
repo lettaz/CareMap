@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   HardDriveDownload,
   Trash2,
+  Loader2,
 } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
@@ -98,6 +99,34 @@ const CATEGORY_COLORS: Record<NodeCategory, string> = {
   quality: "bg-amber-50 text-amber-700",
   sink: "bg-emerald-50 text-emerald-700",
 };
+
+function extractInputSnippet(toolName: string, input: unknown): string | null {
+  if (!input || typeof input !== "object") return null;
+  const inp = input as Record<string, unknown>;
+
+  switch (toolName) {
+    case "run_query":
+      return (inp.sql as string) ?? (inp.query as string) ?? null;
+    case "run_script":
+      return (inp.code as string) ?? (inp.script as string) ?? null;
+    case "execute_cleaning":
+      return inp.actions ? `Cleaning ${(inp.actions as unknown[]).length} action(s)` : null;
+    case "propose_target_schema":
+      return inp.sourceFileIds
+        ? `Analyzing ${(inp.sourceFileIds as string[]).length} source file(s)`
+        : null;
+    case "propose_mappings":
+      return inp.sourceFileIds
+        ? `Mapping ${(inp.sourceFileIds as string[]).length} source(s) to schema`
+        : null;
+    case "generate_artifact":
+      return (inp.userQuestion as string) ?? null;
+    case "export_data":
+      return inp.format ? `Exporting as ${inp.format}` : null;
+    default:
+      return null;
+  }
+}
 
 function chatStorageKey(projectId: string) {
   return `caremap-chat:${projectId}`;
@@ -372,13 +401,13 @@ export function AgentPanel() {
               />
             ))}
             {isStreaming && (
-              <div className="flex items-center gap-2 px-1">
+              <div className="flex items-center gap-2 px-1 text-[11px]">
                 <Shimmer duration={1.5}>Thinking...</Shimmer>
               </div>
             )}
 
             {status === "error" && error && (
-              <div className="mx-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <div className="mx-1 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-700">
                 <p className="font-medium">Something went wrong</p>
                 <p className="mt-0.5 text-red-600">{error.message}</p>
               </div>
@@ -387,7 +416,7 @@ export function AgentPanel() {
             {!isStreaming && (
               <Suggestions className="pt-1">
                 {SUGGESTIONS.map((s) => (
-                  <Suggestion key={s} suggestion={s} onClick={handleSuggestionClick} className="text-xs" />
+                  <Suggestion key={s} suggestion={s} onClick={handleSuggestionClick} className="text-[11px]" />
                 ))}
               </Suggestions>
             )}
@@ -431,7 +460,7 @@ export function AgentPanel() {
             onKeyDown={handleKeyDown}
             placeholder={mentions.length > 0 ? "Type your question..." : "Ask anything about your data... (@ to mention a node)"}
             rows={1}
-            className="w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm text-cm-text-primary placeholder:text-cm-text-tertiary outline-none"
+            className="w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-xs text-cm-text-primary placeholder:text-cm-text-tertiary outline-none"
             style={{ maxHeight: 160 }}
           />
 
@@ -690,20 +719,32 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
             );
           }
 
-          const statusColor = toolPart.state === "output-error"
-            ? "text-red-600"
-            : toolPart.state === "output-available"
-              ? "text-green-600"
-              : "text-cm-text-tertiary";
+          const isRunning = toolPart.state === "running" || toolPart.state === "streaming" || toolPart.state === "partial-call";
+          const isError = toolPart.state === "output-error";
+          const statusColor = isError ? "text-red-600" : isRunning ? "text-cm-accent" : "text-cm-text-tertiary";
+          const dotClass = isError ? "bg-red-500" : isRunning ? "bg-cm-accent animate-pulse" : "bg-slate-300";
+
+          const inputSnippet = extractInputSnippet(toolName, toolPart.input);
 
           return (
-            <div key={i} className="flex items-center gap-2 text-xs py-1">
-              <div className={`h-1.5 w-1.5 rounded-full ${
-                toolPart.state === "output-error" ? "bg-red-500"
-                : toolPart.state === "output-available" ? "bg-green-500"
-                : "bg-cm-accent animate-pulse"
-              }`} />
-              <span className={statusColor}>{label}</span>
+            <div key={i} className="rounded-lg border border-cm-border-primary overflow-hidden">
+              <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotClass}`} />
+                <span className={cn("font-medium", statusColor)}>{label}</span>
+                {isRunning && <Loader2 className="h-3 w-3 animate-spin text-cm-accent ml-auto shrink-0" />}
+              </div>
+              {inputSnippet && (
+                <div className="border-t border-cm-border-subtle bg-cm-bg-elevated/50 px-2.5 py-2 max-h-28 overflow-auto">
+                  <pre className="text-[10px] leading-relaxed text-cm-text-secondary font-mono whitespace-pre-wrap break-all">
+                    {inputSnippet}
+                  </pre>
+                </div>
+              )}
+              {isError && toolPart.errorText && (
+                <div className="border-t border-red-200 bg-red-50 px-2.5 py-1.5 text-[10px] text-red-600">
+                  {toolPart.errorText}
+                </div>
+              )}
             </div>
           );
         }
@@ -721,8 +762,8 @@ function AgentEmptyState({ onSuggestionClick }: { onSuggestionClick: (text: stri
         <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-cm-accent-subtle">
           <Sparkles className="h-5 w-5 text-cm-accent" />
         </div>
-        <h3 className="text-sm font-semibold text-cm-text-primary">CareMap AI</h3>
-        <p className="mt-1 text-xs text-cm-text-secondary leading-relaxed max-w-[260px] mx-auto">
+        <h3 className="text-xs font-semibold text-cm-text-primary">CareMap AI</h3>
+        <p className="mt-1 text-[11px] text-cm-text-secondary leading-relaxed max-w-[260px] mx-auto">
           Ask me to profile sources, suggest mappings, investigate anomalies, or query your harmonised data.
         </p>
       </div>
@@ -735,7 +776,7 @@ function AgentEmptyState({ onSuggestionClick }: { onSuggestionClick: (text: stri
           <button
             key={label}
             onClick={() => onSuggestionClick(label)}
-            className="flex w-full items-center gap-2.5 rounded-lg border border-cm-border-primary bg-white px-3 py-2.5 text-left text-xs text-cm-text-secondary transition-colors hover:bg-cm-bg-elevated hover:text-cm-text-primary"
+            className="flex w-full items-center gap-2.5 rounded-lg border border-cm-border-primary bg-white px-2.5 py-2 text-left text-[11px] text-cm-text-secondary transition-colors hover:bg-cm-bg-elevated hover:text-cm-text-primary"
           >
             <Sparkles className="h-3 w-3 text-cm-accent shrink-0" />
             {label}
