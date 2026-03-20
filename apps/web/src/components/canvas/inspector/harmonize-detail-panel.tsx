@@ -71,7 +71,8 @@ export function HarmonizeDetailPanel({ nodeId }: HarmonizeDetailPanelProps) {
       });
 
       if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.message ?? `Server returned ${response.status}`);
       }
 
       const reader = response.body?.getReader();

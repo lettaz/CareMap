@@ -52,13 +52,11 @@ async function resolveConnectedSourceFileIds(mappingNodeId: string): Promise<str
     .filter(Boolean);
 }
 
-async function resolveAcceptedMappingIds(sourceFileIds: string[]): Promise<string[]> {
-  if (!sourceFileIds.length) return [];
-
+async function resolveProjectAcceptedMappingIds(projectId: string): Promise<string[]> {
   const { data } = await supabase
     .from("field_mappings")
     .select("id")
-    .in("source_file_id", sourceFileIds)
+    .eq("project_id", projectId)
     .eq("status", "accepted");
 
   return (data ?? []).map((m) => m.id as string);
@@ -147,8 +145,7 @@ export const pipelineRoutes: FastifyPluginAsync = async (app) => {
       case "harmonize_requested": {
         let mappingIds = context?.mappingIds as string[] | undefined;
         if (!mappingIds?.length) {
-          const sourceFileIds = await resolveConnectedSourceFileIds(nodeId);
-          mappingIds = await resolveAcceptedMappingIds(sourceFileIds);
+          mappingIds = await resolveProjectAcceptedMappingIds(projectId);
         }
         if (!mappingIds?.length) throw new ValidationError("No accepted mappings found for harmonization");
         userMessage = `Project ID: ${projectId}. The user wants to harmonize data via node ${nodeId}. Please run harmonization using confirmed mappings. Mapping IDs: ${JSON.stringify(mappingIds)}`;
