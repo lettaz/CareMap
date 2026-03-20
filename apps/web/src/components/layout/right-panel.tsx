@@ -98,15 +98,15 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
 
   const panelContent = showInspector ? (
     nodeCategory === "source" ? (
-      <SourceDetailPanel nodeId={selectedNode!.id} />
+      <SourceDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
     ) : nodeCategory === "transform" ? (
-      <MappingDetailPanel nodeId={selectedNode!.id} />
+      <MappingDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
     ) : nodeCategory === "harmonize" ? (
-      <HarmonizeDetailPanel nodeId={selectedNode!.id} />
+      <HarmonizeDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
     ) : nodeCategory === "quality" ? (
-      <QualityDetailPanel nodeId={selectedNode!.id} />
+      <QualityDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
     ) : nodeCategory === "sink" ? (
-      <ExportDetailPanel nodeId={selectedNode!.id} />
+      <ExportDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
     ) : null
   ) : (
     <AgentPanel />

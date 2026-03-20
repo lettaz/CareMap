@@ -64,6 +64,9 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
       .map((n) => n!);
   }, [pipeline, nodeId]);
 
+  const connectedSourceFileIdsRef = useRef(connectedSourceFileIds);
+  connectedSourceFileIdsRef.current = connectedSourceFileIds;
+
   const [allMappings, setAllMappings] = useState<FieldMappingDTO[]>([]);
   const [schema, setSchema] = useState<TargetSchemaDTO | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,15 +74,20 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
   const [activating, setActivating] = useState(false);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const wasRunningRef = useRef(false);
 
   const isRunning = node?.data.status === "running";
 
+  const hasIncomingEdges = pipeline?.edges.some((e) => e.target === nodeId) ?? false;
+
   const mappings = useMemo(() => {
-    if (connectedSourceFileIds.size === 0) return allMappings;
+    if (connectedSourceFileIds.size === 0) {
+      return hasIncomingEdges ? [] : allMappings;
+    }
     return allMappings.filter(
       (m) => !m.source_file_id || connectedSourceFileIds.has(m.source_file_id),
     );
-  }, [allMappings, connectedSourceFileIds]);
+  }, [allMappings, connectedSourceFileIds, hasIncomingEdges]);
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -90,22 +98,26 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
       ]);
       setAllMappings(res.data);
       setSchema(s);
-
-      const scopedMappings = connectedSourceFileIds.size > 0
-        ? res.data.filter((m) => !m.source_file_id || connectedSourceFileIds.has(m.source_file_id))
-        : res.data;
-
-      const totalFields = s?.tables?.reduce((sum, t) => sum + t.columns.length, 0) ?? 0;
-      const acceptedMappings = scopedMappings.filter((m) => m.status === "accepted").length;
-      updateNodeData(projectId, nodeId, {
-        schemaStatus: s?.status as PipelineNodeData["schemaStatus"],
-        schemaTableCount: s?.tables?.length ?? 0,
-        totalFields,
-        mappedCount: acceptedMappings,
-        sourceCount: connectedSourceFileIds.size || undefined,
-      });
     } catch { /* silent */ }
-  }, [projectId, nodeId, updateNodeData, connectedSourceFileIds]);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const csfi = connectedSourceFileIdsRef.current;
+    const scopedMappings = csfi.size > 0
+      ? allMappings.filter((m) => !m.source_file_id || csfi.has(m.source_file_id))
+      : allMappings;
+    const totalFields = schema?.tables?.reduce((sum, t) => sum + t.columns.length, 0) ?? 0;
+    const acceptedCount = scopedMappings.filter((m) => m.status === "accepted").length;
+    updateNodeData(projectId, nodeId, {
+      schemaStatus: (schema?.status as PipelineNodeData["schemaStatus"]) ?? undefined,
+      schemaTableCount: schema?.tables?.length ?? 0,
+      totalFields,
+      mappedCount: acceptedCount,
+      sourceCount: csfi.size || undefined,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schema, allMappings, projectId, nodeId]);
 
   useEffect(() => {
     if (schema?.tables?.length && !activeTab) {
@@ -116,16 +128,19 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
   useEffect(() => {
     setLoading(true);
     loadData().finally(() => setLoading(false));
-  }, [loadData]);
+  }, [loadData, nodeId]);
 
   useEffect(() => {
-    if (!isRunning) {
-      if (pollRef.current) clearInterval(pollRef.current);
-      loadData();
-      return;
+    if (isRunning) {
+      wasRunningRef.current = true;
+      pollRef.current = setInterval(loadData, 4000);
+      return () => { if (pollRef.current) clearInterval(pollRef.current); };
     }
-    pollRef.current = setInterval(loadData, 4000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (wasRunningRef.current) {
+      wasRunningRef.current = false;
+      loadData();
+    }
   }, [isRunning, loadData]);
 
   const handleAccept = useCallback(async (id: string) => {
