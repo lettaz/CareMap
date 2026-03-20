@@ -1,6 +1,6 @@
 import type { Node, Edge } from "@xyflow/react";
 
-export type NodeCategory = "source" | "transform" | "quality" | "sink";
+export type NodeCategory = "source" | "transform" | "harmonize" | "quality" | "sink";
 export type NodeStatus = "ready" | "running" | "warning" | "error" | "idle";
 export type FileType = "csv" | "xlsx" | "pdf" | "txt";
 export type MappingStatus = "pending" | "accepted" | "rejected";
@@ -23,13 +23,19 @@ export interface PipelineNodeData extends Record<string, unknown> {
   sourceCount?: number;
   totalFields?: number;
   confidenceAvg?: number;
+  schemaStatus?: "draft" | "active" | "archived";
+  schemaTableCount?: number;
   /** Quality-specific */
   checksPass?: number;
   checksWarn?: number;
   checksFail?: number;
+  /** Harmonize-specific */
+  tableCount?: number;
+  harmonizedRowCount?: number;
   /** Sink-specific */
   targetTable?: string;
   lastSyncAt?: string;
+  format?: string;
   /** Issue indicator — count of problems requiring attention */
   issueCount?: number;
 }

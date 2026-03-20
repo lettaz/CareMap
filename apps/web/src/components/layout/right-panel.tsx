@@ -7,7 +7,9 @@ import { useIsMobile } from "@/hooks/use-is-mobile";
 import { AgentPanel } from "./agent-panel";
 import { SourceDetailPanel } from "@/components/canvas/inspector/source-detail-panel";
 import { MappingDetailPanel } from "@/components/canvas/inspector/mapping-detail-panel";
-import { NodeInspector } from "@/components/canvas/inspector/node-inspector";
+import { HarmonizeDetailPanel } from "@/components/canvas/inspector/harmonize-detail-panel";
+import { QualityDetailPanel } from "@/components/canvas/inspector/quality-detail-panel";
+import { ExportDetailPanel } from "@/components/canvas/inspector/export-detail-panel";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -15,12 +17,14 @@ interface RightPanelProps {
   isCanvasRoute: boolean;
 }
 
-const DEFAULT_WIDTHS = {
+const DEFAULT_WIDTHS: Record<string, number> = {
   agent: 480,
   source: 580,
   transform: 560,
-  default: 420,
-} as const;
+  harmonize: 480,
+  quality: 420,
+  sink: 420,
+};
 
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 900;
@@ -45,11 +49,7 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
   const baseWidth = !isPanelOpen
     ? 0
     : showInspector
-      ? nodeCategory === "source"
-        ? DEFAULT_WIDTHS.source
-        : nodeCategory === "transform"
-          ? DEFAULT_WIDTHS.transform
-          : DEFAULT_WIDTHS.default
+      ? DEFAULT_WIDTHS[nodeCategory ?? ""] ?? 420
       : DEFAULT_WIDTHS.agent;
 
   const [panelWidth, setPanelWidth] = useState(baseWidth);
@@ -101,9 +101,13 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
       <SourceDetailPanel nodeId={selectedNode!.id} />
     ) : nodeCategory === "transform" ? (
       <MappingDetailPanel nodeId={selectedNode!.id} />
-    ) : (
-      <NodeInspector nodeId={selectedNode!.id} />
-    )
+    ) : nodeCategory === "harmonize" ? (
+      <HarmonizeDetailPanel nodeId={selectedNode!.id} />
+    ) : nodeCategory === "quality" ? (
+      <QualityDetailPanel nodeId={selectedNode!.id} />
+    ) : nodeCategory === "sink" ? (
+      <ExportDetailPanel nodeId={selectedNode!.id} />
+    ) : null
   ) : (
     <AgentPanel />
   );

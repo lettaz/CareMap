@@ -60,6 +60,8 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
   const sections = [BASE_SYSTEM_PROMPT];
 
   sections.push(`\n## Project: ${ctx.projectName}`);
+  sections.push(`Project ID: ${projectId}`);
+  sections.push("IMPORTANT: Always use this exact Project ID when calling tools that require a projectId parameter. Never guess or fabricate a UUID.");
   if (ctx.projectDescription) {
     sections.push(`Description: ${ctx.projectDescription}`);
   }

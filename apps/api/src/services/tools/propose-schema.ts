@@ -171,7 +171,7 @@ export const proposeTargetSchemaTool = tool({
           name: t.name,
           description: t.description,
           columnCount: t.columns.length,
-          columns: t.columns.map((c) => c.name),
+          columns: t.columns,
         })),
         reasoning: result.reasoning ?? null,
       };

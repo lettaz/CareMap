@@ -139,7 +139,7 @@ export const pipelineRoutes: FastifyPluginAsync = async (app) => {
         if (schemaExists) {
           userMessage = `Project ID: ${projectId}. Source nodes have been connected to mapping node ${nodeId}. An active target schema already exists. Please propose field mappings for all connected sources. Source file IDs: ${JSON.stringify(sourceFileIds)}`;
         } else {
-          userMessage = `Project ID: ${projectId}. Source nodes have been connected to mapping node ${nodeId}. There is NO active target schema yet. First, use the propose_target_schema tool to analyze all source profiles and design a target schema. Source file IDs: ${JSON.stringify(sourceFileIds)}. After proposing the schema, DO NOT proceed to mapping — the user needs to review and activate the schema first.`;
+          userMessage = `Project ID: ${projectId}. Source nodes have been connected to mapping node ${nodeId}. There is NO active target schema yet. First, use the propose_target_schema tool to analyze all source profiles and design a target schema. Source file IDs: ${JSON.stringify(sourceFileIds)}. After proposing the schema, inform the user that they need to review and activate it in the Transform panel before field mappings can be generated.`;
         }
         break;
       }

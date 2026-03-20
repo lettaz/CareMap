@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { ModelConfig } from "@/components/settings/model-config";
 import { MappingThresholds } from "@/components/settings/mapping-thresholds";
 import { Separator } from "@/components/ui/separator";
@@ -16,14 +16,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Trash2, Zap, Loader2, Pencil, Check, X } from "lucide-react";
-import { useActiveProject } from "@/hooks/use-active-project";
 import { useProjectStore } from "@/lib/stores/project-store";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const { projectId } = useParams<{ projectId: string }>();
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const { project } = useActiveProject();
+  const project = useProjectStore((s) => s.projects.find((p) => p.id === projectId) ?? null);
   const updateProjectSettings = useProjectStore((s) => s.updateProjectSettings);
   const updateProject = useProjectStore((s) => s.updateProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);

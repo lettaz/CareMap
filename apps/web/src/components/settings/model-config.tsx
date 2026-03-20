@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useParams } from "react-router-dom";
 import { MODEL_OPTIONS } from "@/lib/constants";
 import {
   Select,
@@ -10,7 +11,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Loader2, Check } from "lucide-react";
-import { useActiveProject } from "@/hooks/use-active-project";
 import { useProjectStore } from "@/lib/stores/project-store";
 
 interface ModelSettings {
@@ -21,7 +21,8 @@ interface ModelSettings {
 }
 
 export function ModelConfig() {
-  const { project } = useActiveProject();
+  const { projectId } = useParams<{ projectId: string }>();
+  const project = useProjectStore((s) => s.projects.find((p) => p.id === projectId) ?? null);
   const updateProjectSettings = useProjectStore((s) => s.updateProjectSettings);
 
   const saved = (project?.settings?.model ?? {}) as Partial<ModelSettings>;

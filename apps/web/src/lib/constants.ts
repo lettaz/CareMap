@@ -17,6 +17,7 @@ export const MODEL_OPTIONS: {
   label: string;
   provider: string;
 }[] = [
+  { id: "gpt-5.2", label: "GPT-5.2", provider: "OpenAI" },
   { id: "gpt-4o", label: "GPT-4o", provider: "OpenAI" },
   { id: "claude-sonnet-4", label: "Claude Sonnet 4", provider: "Anthropic" },
   { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "Google" },

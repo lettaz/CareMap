@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { Download, Table2, BarChart3, CheckCircle2, XCircle, Pin, Check } from "lucide-react";
+import {
+  Download, Table2, BarChart3, CheckCircle2, XCircle, Pin, Check,
+  Wand2, ChevronDown, ChevronRight, AlertTriangle,
+} from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -31,6 +34,8 @@ export function ToolResultRenderer({ toolName, output }: ToolResultRendererProps
       return <QueryResult data={data} />;
     case "export_data":
       return <ExportResult data={data} />;
+    case "suggest_cleaning":
+      return <CleaningPlanResult data={data} />;
     case "execute_cleaning":
     case "run_harmonization":
       return <PipelineResult data={data} toolName={toolName} />;
@@ -164,7 +169,8 @@ function PipelineResult({ data, toolName }: { data: Record<string, unknown>; too
 function SchemaResult({ data }: { data: Record<string, unknown> }) {
   const tables = data.tables as Array<{
     name: string;
-    columns: Array<{ name: string; type: string; description?: string }>;
+    description?: string;
+    columns: Array<string | { name: string; type: string; description?: string; required?: boolean }>;
   }> | undefined;
 
   if (!tables?.length) return null;
@@ -177,13 +183,29 @@ function SchemaResult({ data }: { data: Record<string, unknown> }) {
       {tables.map((table) => (
         <div key={table.name} className="rounded-md border border-cm-border-subtle p-2">
           <p className="text-xs font-semibold text-cm-text-primary mb-1">{table.name}</p>
+          {table.description && (
+            <p className="text-[10px] text-cm-text-tertiary mb-1.5">{table.description}</p>
+          )}
           <div className="space-y-0.5">
-            {table.columns.map((col) => (
-              <div key={col.name} className="flex items-center gap-2 text-xs">
-                <span className="font-mono text-cm-text-primary">{col.name}</span>
-                <span className="text-cm-text-tertiary">{col.type}</span>
-              </div>
-            ))}
+            {table.columns.map((col) => {
+              const isObj = typeof col === "object";
+              const name = isObj ? col.name : col;
+              const type = isObj ? col.type : undefined;
+              const required = isObj ? col.required : false;
+              return (
+                <div key={name} className="flex items-center gap-2 text-xs">
+                  <span className="font-mono text-cm-text-primary">{name}</span>
+                  {type && (
+                    <span className="rounded bg-cm-bg-elevated px-1 py-0.5 text-[10px] text-cm-text-tertiary font-mono">
+                      {type}
+                    </span>
+                  )}
+                  {required && (
+                    <span className="text-[9px] text-cm-accent font-medium uppercase">req</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       ))}
@@ -454,6 +476,120 @@ function renderChart(spec: ChartSpec) {
         </BarChart>
       );
   }
+}
+
+const ACTION_ICONS: Record<string, string> = {
+  parseDate: "Calendar",
+  fillNulls: "Fill missing values",
+  normalizeString: "Standardize text",
+  castType: "Convert type",
+  deduplicateRows: "Remove duplicates",
+  convertUnit: "Convert units",
+};
+
+function CleaningPlanResult({ data }: { data: Record<string, unknown> }) {
+  const actions = data.actions as Array<{
+    column: string;
+    action: string;
+    params?: Record<string, unknown>;
+    reason: string;
+  }> | undefined;
+  const summary = data.summary as string | undefined;
+  const actionCount = (data.actionCount as number) ?? actions?.length ?? 0;
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  if (!actions?.length) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-xs text-green-700">
+        <CheckCircle2 className="h-4 w-4 shrink-0" />
+        No cleaning actions needed — data looks good.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-cm-border-subtle bg-gradient-to-r from-amber-50 to-orange-50">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-100">
+            <Wand2 className="h-3.5 w-3.5 text-amber-700" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-cm-text-primary">
+              Cleaning Plan
+            </p>
+            <p className="text-[10px] text-cm-text-tertiary">
+              {actionCount} action{actionCount !== 1 ? "s" : ""} proposed
+            </p>
+          </div>
+        </div>
+        {summary && (
+          <span className="max-w-[180px] truncate rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-cm-text-secondary">
+            {summary}
+          </span>
+        )}
+      </div>
+
+      <div className="divide-y divide-cm-border-subtle">
+        {actions.map((action, i) => {
+          const isExpanded = expandedIdx === i;
+          const actionLabel = ACTION_ICONS[action.action] ?? action.action.replace(/([A-Z])/g, " $1").trim();
+
+          return (
+            <div key={i}>
+              <button
+                type="button"
+                onClick={() => setExpandedIdx(isExpanded ? null : i)}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-cm-bg-elevated/50 transition-colors"
+              >
+                {isExpanded
+                  ? <ChevronDown className="h-3 w-3 text-cm-text-tertiary shrink-0" />
+                  : <ChevronRight className="h-3 w-3 text-cm-text-tertiary shrink-0" />}
+
+                <div className="flex h-5 w-5 items-center justify-center rounded bg-amber-100 shrink-0">
+                  <AlertTriangle className="h-2.5 w-2.5 text-amber-600" />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-[11px] font-medium text-cm-text-primary">
+                      {action.column}
+                    </span>
+                    <span className="rounded bg-cm-bg-elevated px-1.5 py-0.5 text-[10px] text-cm-text-tertiary capitalize">
+                      {actionLabel}
+                    </span>
+                  </div>
+                </div>
+              </button>
+
+              {isExpanded && (
+                <div className="bg-cm-bg-elevated/40 px-3 pb-2.5 pl-10 space-y-1.5">
+                  <p className="text-[11px] text-cm-text-secondary leading-relaxed">
+                    {action.reason}
+                  </p>
+                  {action.params && Object.keys(action.params).length > 0 && (
+                    <div className="rounded-md border border-cm-border-subtle bg-cm-bg-surface p-2">
+                      <p className="text-[9px] font-medium uppercase tracking-wide text-cm-text-tertiary mb-1">
+                        Parameters
+                      </p>
+                      <div className="space-y-0.5">
+                        {Object.entries(action.params).map(([key, val]) => (
+                          <div key={key} className="flex items-center gap-2 text-[10px]">
+                            <span className="font-mono text-cm-text-tertiary">{key}:</span>
+                            <span className="text-cm-text-primary">{String(val)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function GenericResult({ data }: { data: Record<string, unknown> }) {

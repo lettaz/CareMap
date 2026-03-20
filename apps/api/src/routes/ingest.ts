@@ -159,7 +159,17 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       await saveStep.finish({ savedCount: profile.columns.length });
       sseWrite(reply.raw, "step", { stepType: "save_profiles", status: "completed", output: { savedCount: profile.columns.length } });
 
-      sseWrite(reply.raw, "profile_complete", profile.summary);
+      const criticalFlags = ["high_null_rate", "duplicate_rows", "data_type_mismatch"];
+      const avgConfidence = profile.columns.reduce((sum, c) => sum + c.confidence, 0) / (profile.columns.length || 1);
+      const criticalFlagCount = profile.columns.filter(
+        (c) => c.qualityFlags.some((f) => criticalFlags.includes(f)),
+      ).length;
+
+      sseWrite(reply.raw, "profile_complete", {
+        ...profile.summary,
+        avgConfidence,
+        criticalFlagCount,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Profiling failed";
       sseWrite(reply.raw, "step", { stepType: "error", status: "error", output: { message } });

@@ -32,8 +32,8 @@ const NODE_TYPE_MAP: Record<string, string> = {
   source: "source",
   mapping: "transform",
   transform: "transform",
+  harmonize: "harmonize",
   quality: "quality",
-  harmonize: "sink",
   output: "sink",
   sink: "sink",
 };
@@ -42,8 +42,8 @@ const CATEGORY_MAP: Record<string, NodeCategory> = {
   source: "source",
   mapping: "transform",
   transform: "transform",
+  harmonize: "harmonize",
   quality: "quality",
-  harmonize: "sink",
   output: "sink",
   sink: "sink",
 };
@@ -77,7 +77,7 @@ function nodeToSaveDTO(node: PipelineNode) {
   const { category, status, label, ...config } = node.data;
   let nodeType = category as string;
   if (category === "transform") nodeType = "mapping";
-  if (category === "sink") nodeType = "harmonize";
+  if (category === "sink") nodeType = "output";
 
   return {
     id: node.id,

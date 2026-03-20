@@ -17,7 +17,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import type { UIMessage } from "ai";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
@@ -86,16 +86,18 @@ interface MentionChip {
   category: NodeCategory;
 }
 
-const CATEGORY_ICONS: Record<NodeCategory, typeof Database> = {
+const CATEGORY_ICONS: Record<string, typeof Database> = {
   source: Database,
   transform: GitMerge,
+  harmonize: Database,
   quality: ShieldCheck,
   sink: HardDriveDownload,
 };
 
-const CATEGORY_COLORS: Record<NodeCategory, string> = {
+const CATEGORY_COLORS: Record<string, string> = {
   source: "bg-blue-50 text-blue-700",
   transform: "bg-violet-50 text-violet-700",
+  harmonize: "bg-cyan-50 text-cyan-700",
   quality: "bg-amber-50 text-amber-700",
   sink: "bg-emerald-50 text-emerald-700",
 };
@@ -125,6 +127,26 @@ function extractInputSnippet(toolName: string, input: unknown): string | null {
       return inp.format ? `Exporting as ${inp.format}` : null;
     default:
       return null;
+  }
+}
+
+const _consumedPendingKeys = new Set<string>();
+
+function buildMentionMarkup(mention: MentionChip): string {
+  const ref = mention.sourceFileId ?? mention.id;
+  const tag = `@[${mention.label}](${ref})`;
+
+  switch (mention.category) {
+    case "transform":
+      return `${tag} [transform node — can generate schema & field mappings]`;
+    case "harmonize":
+      return `${tag} [harmonize node — can run harmonization on accepted mappings]`;
+    case "quality":
+      return `${tag} [quality check node — can run data quality checks]`;
+    case "sink":
+      return `${tag} [export/store node — can export harmonized data]`;
+    default:
+      return tag;
   }
 }
 
@@ -158,6 +180,7 @@ export function AgentPanel() {
   const { projectId } = useParams<{ projectId: string }>();
   const nodeContext = useAgentStore((s) => s.nodeContext);
   const setNodeContext = useAgentStore((s) => s.setNodeContext);
+  const openPanel = useAgentStore((s) => s.openPanel);
   const pipelineNodes = usePipelineStore((s) =>
     projectId ? s.pipelines[projectId]?.nodes ?? [] : [],
   );
@@ -195,6 +218,7 @@ export function AgentPanel() {
   const chat = useChat({
     transport,
     messages: initialMessages,
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onError: (error) => {
       console.error("Chat error:", error);
     },
@@ -213,8 +237,14 @@ export function AgentPanel() {
     persistMessages(projectId, []);
   }, [setMessages, projectId]);
 
+  const nodeContextConsumedRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!nodeContext || !projectId) return;
+    const contextKey = `${nodeContext.nodeId}::${nodeContext.sourceFileId ?? ""}`;
+    if (nodeContextConsumedRef.current === contextKey) return;
+    nodeContextConsumedRef.current = contextKey;
+
     const filename = nodeContext.filename ?? nodeContext.label;
     const sfId = nodeContext.sourceFileId ?? "";
     const matchedNode = pipelineNodes.find((n) => n.data.sourceFileId === sfId);
@@ -237,7 +267,46 @@ export function AgentPanel() {
       });
     }
     setNodeContext(null);
+    setTimeout(() => { nodeContextConsumedRef.current = null; }, 2000);
   }, [nodeContext, projectId, setNodeContext, pipelineNodes]);
+
+  const pendingMessage = useAgentStore((s) => s.pendingMessage);
+  const setPendingMessage = useAgentStore((s) => s.setPendingMessage);
+  const updateNodeData = usePipelineStore((s) => s.updateNodeData);
+  const activeTransformRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingMessage || !projectId || status !== "ready") return;
+
+    const msgKey = `${pendingMessage.text}::${pendingMessage.mentions.map((m) => m.id).join(",")}`;
+    if (_consumedPendingKeys.has(msgKey)) return;
+    _consumedPendingKeys.add(msgKey);
+
+    const { text, mentions: pendingMentions, transformNodeId } = pendingMessage;
+    setPendingMessage(null);
+    openPanel();
+
+    if (transformNodeId) activeTransformRef.current = transformNodeId;
+
+    const mentionMarkup = pendingMentions
+      .map((m) => buildMentionMarkup({
+        label: m.label,
+        id: m.id,
+        sourceFileId: m.sourceFileId,
+        category: m.category,
+      }))
+      .join(" ");
+    const composed = mentionMarkup ? `${mentionMarkup} ${text}` : text;
+    sendMessage({ text: composed });
+
+    setTimeout(() => { _consumedPendingKeys.delete(msgKey); }, 5000);
+  }, [pendingMessage, projectId, status, setPendingMessage, openPanel, sendMessage]);
+
+  useEffect(() => {
+    if (status !== "ready" || !activeTransformRef.current || !projectId) return;
+    updateNodeData(projectId, activeTransformRef.current, { status: "ready" });
+    activeTransformRef.current = null;
+  }, [status, projectId, updateNodeData]);
 
   const insertMention = useCallback(
     (node: { id: string; data: { label: string; category: NodeCategory; sourceFileId?: string } }) => {
@@ -274,9 +343,7 @@ export function AgentPanel() {
   const handleSend = useCallback(() => {
     if (!projectId) return;
     if (!draft.trim() && mentions.length === 0) return;
-    const mentionParts = mentions
-      .map((m) => `@[${m.label}](${m.sourceFileId ?? m.id})`)
-      .join(" ");
+    const mentionParts = mentions.map(buildMentionMarkup).join(" ");
     const text = mentionParts ? `${mentionParts} ${draft.trim()}` : draft.trim();
     sendMessage({ text });
     setDraft("");
@@ -680,6 +747,7 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
           const isDestructive = DESTRUCTIVE_TOOLS.has(toolName);
 
           if (isDestructive && toolPart.state === "approval-requested") {
+            const approvalId = (toolPart as unknown as { approval?: { id: string } }).approval?.id ?? toolPart.toolCallId;
             return (
               <div key={i} className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
                 <p className="font-medium text-amber-800">
@@ -690,14 +758,14 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
                     variant="outline"
                     size="sm"
                     className="h-7 text-xs"
-                    onClick={() => onReject(toolPart.toolCallId)}
+                    onClick={() => onReject(approvalId)}
                   >
                     Reject
                   </Button>
                   <Button
                     size="sm"
                     className="h-7 text-xs bg-cm-accent text-white hover:bg-cm-accent-hover"
-                    onClick={() => onApprove(toolPart.toolCallId)}
+                    onClick={() => onApprove(approvalId)}
                   >
                     Approve
                   </Button>

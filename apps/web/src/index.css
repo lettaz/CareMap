@@ -43,6 +43,8 @@
   --cm-node-source-subtle: #EFF6FF;
   --cm-node-transform: #059669;
   --cm-node-transform-subtle: #ECFDF5;
+  --cm-node-harmonize: #0891B2;
+  --cm-node-harmonize-subtle: #ECFEFF;
   --cm-node-quality: #D97706;
   --cm-node-quality-subtle: #FFFBEB;
   --cm-node-sink: #6366F1;
@@ -161,6 +163,8 @@
   --color-cm-node-source-subtle: var(--cm-node-source-subtle);
   --color-cm-node-transform: var(--cm-node-transform);
   --color-cm-node-transform-subtle: var(--cm-node-transform-subtle);
+  --color-cm-node-harmonize: var(--cm-node-harmonize);
+  --color-cm-node-harmonize-subtle: var(--cm-node-harmonize-subtle);
   --color-cm-node-quality: var(--cm-node-quality);
   --color-cm-node-quality-subtle: var(--cm-node-quality-subtle);
   --color-cm-node-sink: var(--cm-node-sink);

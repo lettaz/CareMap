@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, FileUp, Shuffle, Database, Download, ShieldCheck } from "lucide-react";
+import { Plus, FileUp, Shuffle, Layers, Download, ShieldCheck } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -16,16 +16,17 @@ const NODE_GAP = 24;
 
 const CATEGORY_X: Record<NodeCategory, number> = {
   source: 50,
-  transform: 400,
-  quality: 700,
-  sink: 1000,
+  transform: 350,
+  harmonize: 600,
+  quality: 850,
+  sink: 1100,
 };
 
 const NODE_OPTIONS = [
   { category: "source" as NodeCategory, label: "Source", icon: FileUp, color: "text-cm-node-source", bg: "bg-cm-node-source-subtle", desc: "Upload a CSV, XLSX or TXT file" },
   { category: "transform" as NodeCategory, label: "Transform", icon: Shuffle, color: "text-cm-node-transform", bg: "bg-cm-node-transform-subtle", desc: "Map & join fields across sources" },
+  { category: "harmonize" as NodeCategory, label: "Harmonize", icon: Layers, color: "text-cm-node-harmonize", bg: "bg-cm-node-harmonize-subtle", desc: "Merge accepted mappings into canonical tables" },
   { category: "quality" as NodeCategory, label: "Quality Check", icon: ShieldCheck, color: "text-cm-node-quality", bg: "bg-cm-node-quality-subtle", desc: "Validate data integrity and quality rules" },
-  { category: "sink" as NodeCategory, label: "Harmonize", icon: Database, color: "text-cm-node-sink", bg: "bg-cm-node-sink-subtle", desc: "Merge into canonical tables" },
   { category: "sink" as NodeCategory, label: "Output", icon: Download, color: "text-cm-node-sink", bg: "bg-cm-node-sink-subtle", desc: "Export in CSV, JSON, XLSX or Parquet" },
 ];
 

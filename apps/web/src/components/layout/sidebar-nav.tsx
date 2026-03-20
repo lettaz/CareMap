@@ -1,11 +1,10 @@
-import { NavLink, useLocation } from "react-router-dom";
-import { Workflow, LayoutDashboard, FolderOpen, Settings } from "lucide-react";
+import { NavLink, useLocation, useParams } from "react-router-dom";
+import { Workflow, LayoutDashboard, FolderOpen, Settings, User } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useActiveProject } from "@/hooks/use-active-project";
 import { cn } from "@/lib/utils";
 
 interface SidebarItemProps {
@@ -60,7 +59,7 @@ function BottomNavItem({ to, icon: Icon, label, matchEnd }: SidebarItemProps) {
 }
 
 export function SidebarNav() {
-  const { projectId } = useActiveProject();
+  const { projectId } = useParams<{ projectId: string }>();
   const location = useLocation();
 
   const isInsideProject =
@@ -86,13 +85,25 @@ export function SidebarNav() {
                 icon={LayoutDashboard}
                 label="Dashboard"
               />
+              <SidebarItem
+                to={`/projects/${projectId}/settings`}
+                icon={Settings}
+                label="Settings"
+              />
             </div>
           </>
         )}
 
         <div className="flex-1" />
 
-        <SidebarItem to="/settings" icon={Settings} label="Settings" />
+        <Tooltip>
+          <TooltipTrigger>
+            <div className="flex size-8 items-center justify-center rounded-full bg-cm-accent-subtle text-cm-accent cursor-default">
+              <User className="size-4" />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="right">Profile</TooltipContent>
+        </Tooltip>
       </nav>
 
       {/* Mobile bottom nav */}
@@ -110,9 +121,13 @@ export function SidebarNav() {
               icon={LayoutDashboard}
               label="Dashboard"
             />
+            <BottomNavItem
+              to={`/projects/${projectId}/settings`}
+              icon={Settings}
+              label="Settings"
+            />
           </>
         )}
-        <BottomNavItem to="/settings" icon={Settings} label="Settings" />
       </nav>
     </>
   );

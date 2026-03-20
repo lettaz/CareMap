@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams } from "react-router-dom";
 import { Slider } from "@/components/ui/slider";
-import { useActiveProject } from "@/hooks/use-active-project";
 import { useProjectStore } from "@/lib/stores/project-store";
 
 interface ThresholdSettings {
@@ -9,7 +9,8 @@ interface ThresholdSettings {
 }
 
 export function MappingThresholds() {
-  const { project } = useActiveProject();
+  const { projectId } = useParams<{ projectId: string }>();
+  const project = useProjectStore((s) => s.projects.find((p) => p.id === projectId) ?? null);
   const updateProjectSettings = useProjectStore((s) => s.updateProjectSettings);
 
   const saved = (project?.settings?.thresholds ?? {}) as Partial<ThresholdSettings>;
@@ -83,13 +84,18 @@ export function MappingThresholds() {
         />
       </div>
 
-      <div className="rounded-lg border border-cm-border-subtle bg-cm-bg-elevated p-3 text-xs leading-relaxed text-cm-text-secondary">
+      <div className="rounded-lg border border-cm-border-subtle bg-cm-bg-elevated p-3 text-xs leading-relaxed text-cm-text-secondary space-y-1.5">
         <p>
           Mappings with confidence <strong>&ge; {autoAccept.toFixed(2)}</strong> are accepted
           automatically. Confidence between{" "}
           <strong>{review.toFixed(2)}</strong> and{" "}
           <strong>{autoAccept.toFixed(2)}</strong> requires manual review. Below{" "}
           <strong>{review.toFixed(2)}</strong> mappings are rejected.
+        </p>
+        <p>
+          After profiling, if the average column confidence falls below{" "}
+          <strong>{review.toFixed(2)}</strong>, CareMap AI will proactively suggest a data
+          cleaning plan.
         </p>
       </div>
     </div>

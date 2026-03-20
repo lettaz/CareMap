@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
+import { useProjectStore } from "@/lib/stores/project-store";
 import { useActiveProject } from "@/hooks/use-active-project";
 import { EditableLabel } from "@/components/shared/editable-label";
 import { SourceUploadZone } from "./source-upload-zone";
@@ -71,13 +72,22 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
     if (profile?.sourceFileId === sourceFileId) return;
 
     fetchDetailedProfile(sourceFileId)
-      .then(setProfile)
+      .then((p) => {
+        setProfile(p);
+        if (projectId) {
+          const issueCount = p.columns.filter((c) => {
+            const stats = c.nativeStats as Record<string, unknown>;
+            return Number(stats?.nullCount ?? 0) / p.rowCount > 0.1;
+          }).length;
+          updateNodeData(projectId, nodeId, { issueCount });
+        }
+      })
       .catch(() => {});
 
     fetchSampleRows(sourceFileId, { page: 1, pageSize: 20 })
       .then((res) => setSampleRows(res.data))
       .catch(() => setSampleRows([]));
-  }, [hasExistingData, sourceFileId, profile?.sourceFileId]);
+  }, [hasExistingData, sourceFileId, profile?.sourceFileId, projectId, nodeId, updateNodeData]);
 
   const handleFileSelected = useCallback(
     (file: File) => {
@@ -156,6 +166,8 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                 setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" as const })));
 
                 const suggestedLabel = (inner.suggestedLabel as string) ?? file.name.replace(/\.[^.]+$/, "");
+                const overallQuality = inner.overallQuality as string | undefined;
+                const avgConfidence = inner.avgConfidence as number | undefined;
 
                 updateNodeData(projectId, nodeId, {
                   status: "ready",
@@ -169,12 +181,31 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                   .then((p) => {
                     setProfile(p);
                     setPhase("preview");
+                    const issueCount = p.columns.filter((c) => {
+                      const stats = c.nativeStats as Record<string, unknown>;
+                      return Number(stats?.nullCount ?? 0) / p.rowCount > 0.1;
+                    }).length;
+                    if (issueCount > 0) {
+                      updateNodeData(projectId, nodeId, { issueCount });
+                    }
                   })
                   .catch(() => setPhase("preview"));
 
                 fetchSampleRows(sfId, { page: 1, pageSize: 20 })
                   .then((res) => setSampleRows(res.data))
                   .catch(() => {});
+
+                const thresholds = (projectSettings?.thresholds as Record<string, number>) ?? {};
+                const reviewThreshold = thresholds.review ?? 0.6;
+                const shouldSuggest =
+                  overallQuality === "poor" || (avgConfidence != null && avgConfidence < reviewThreshold);
+
+                if (shouldSuggest) {
+                  setPendingMessage({
+                    text: "Review the profile for this source and suggest a cleaning plan",
+                    mentions: [{ label: suggestedLabel, id: nodeId, sourceFileId: sfId, category: "source" }],
+                  });
+                }
                 break;
               }
               case "error": {
@@ -209,6 +240,10 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const setNodeContext = useAgentStore((s) => s.setNodeContext);
   const isPanelOpen = useAgentStore((s) => s.isPanelOpen);
   const togglePanel = useAgentStore((s) => s.togglePanel);
+  const setPendingMessage = useAgentStore((s) => s.setPendingMessage);
+  const projectSettings = useProjectStore(
+    (s) => s.projects.find((p) => p.id === projectId)?.settings as Record<string, unknown> | undefined,
+  );
 
   const preview = useMemo<SourcePreview | null>(() => {
     if (!profile) return null;
@@ -286,6 +321,19 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
     if (!isPanelOpen) togglePanel();
   }, [projectId, nodeId, node, sourceFileId, profile, selectNode, setNodeContext, isPanelOpen, togglePanel]);
 
+  const handleRequestCleanup = useCallback(() => {
+    if (!projectId || !sourceFileId || !node) return;
+    setPendingMessage({
+      text: "Suggest a cleaning plan for this source — focus on quality issues",
+      mentions: [{
+        label: node.data.label,
+        id: nodeId,
+        sourceFileId,
+        category: "source",
+      }],
+    });
+  }, [projectId, nodeId, sourceFileId, node, setPendingMessage]);
+
   return (
     <div className="flex w-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-cm-border-primary px-4 py-3 shrink-0">
@@ -340,7 +388,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
 
       {phase === "preview" && preview && (
         <>
-          <SourceSummaryBar preview={preview} onAiClick={handleOpenChat} />
+          <SourceSummaryBar preview={preview} onAiClick={handleOpenChat} onRequestCleanup={handleRequestCleanup} />
 
           {preview.issueCount > 0 && (
             <div className="flex items-center justify-between border-b border-cm-border-primary px-4 py-2 shrink-0">
