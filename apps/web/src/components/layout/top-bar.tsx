@@ -36,6 +36,7 @@ export function TopBar() {
       {/* Desktop search bar */}
       <button
         type="button"
+        data-tour="search-bar"
         className="hidden md:flex w-[240px] lg:w-[320px] shrink-0 items-center gap-2 rounded-md border border-cm-border-primary bg-cm-bg-elevated px-3 py-2 text-left text-sm text-cm-text-tertiary transition-colors hover:bg-cm-bg-hover"
         aria-label="Search or ask"
       >
@@ -63,6 +64,7 @@ export function TopBar() {
             size="icon"
             onClick={togglePanel}
             aria-label="Toggle agent panel"
+            data-tour="agent-toggle"
           >
             <MessageSquare className="size-4 md:hidden" />
             <PanelRight className="hidden md:block size-4" />

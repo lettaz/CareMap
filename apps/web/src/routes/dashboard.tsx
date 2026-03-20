@@ -59,7 +59,7 @@ function DashboardTabs({ kpis, sources, completeness, alerts, lineage, correctio
               Quality overview and pinned insights for this project.
             </p>
           </div>
-          <div className="flex gap-1 rounded-lg border border-cm-border-primary bg-cm-bg-surface p-0.5">
+          <div data-tour="dashboard-tabs" className="flex gap-1 rounded-lg border border-cm-border-primary bg-cm-bg-surface p-0.5">
             <button
               onClick={() => setTab("overview")}
               className={cn(
@@ -101,7 +101,7 @@ function DashboardTabs({ kpis, sources, completeness, alerts, lineage, correctio
           {tab === "overview" && (
             <>
               {/* KPI Row */}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-5">
+              <div data-tour="dashboard-kpis" className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-5">
                 <KpiCard label="Total Sources" value={kpis.totalSources} icon={Database} iconColor="text-cm-node-source" />
                 <KpiCard label="Rows Harmonized" value={kpis.totalRowsHarmonized.toLocaleString()} icon={Layers} iconColor="text-cm-node-sink" />
                 <KpiCard label="Fields Mapped" value={`${kpis.fieldsMapped}/${kpis.fieldsTotal}`} icon={GitBranch} iconColor="text-cm-node-transform" trend="up" trendValue="+3 this session" />

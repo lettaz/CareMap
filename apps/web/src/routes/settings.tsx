@@ -15,8 +15,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Trash2, Zap, Loader2, Pencil, Check, X } from "lucide-react";
+import { Trash2, Zap, Loader2, Pencil, Check, X, RotateCcw } from "lucide-react";
 import { useProjectStore } from "@/lib/stores/project-store";
+import { useTour } from "@/hooks/use-tour";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -33,6 +34,7 @@ export default function SettingsPage() {
   const [descValue, setDescValue] = useState("");
   const [savingName, setSavingName] = useState(false);
 
+  const { restart: restartTour } = useTour();
   const yoloMode = (project?.settings?.yoloMode as boolean) ?? false;
 
   const startEditName = useCallback(() => {
@@ -187,6 +189,36 @@ export default function SettingsPage() {
             Mapping Thresholds
           </h2>
           <MappingThresholds />
+        </section>
+
+        <Separator />
+
+        <section className="space-y-4">
+          <h2 className="text-sm font-medium text-cm-text-secondary uppercase tracking-wider">
+            Onboarding
+          </h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-cm-border-primary bg-cm-bg-surface p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50">
+                <RotateCcw className="h-4 w-4 text-indigo-500" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-cm-text-primary">Replay Tour</p>
+                <p className="text-xs text-cm-text-secondary mt-0.5">
+                  Walk through the platform features again with the guided onboarding tour.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={restartTour}
+              className="shrink-0"
+            >
+              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+              Restart Tour
+            </Button>
+          </div>
         </section>
 
         <Separator />

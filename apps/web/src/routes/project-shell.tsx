@@ -4,6 +4,7 @@ import { useProjectStore } from "@/lib/stores/project-store";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { RightPanel } from "@/components/layout/right-panel";
+import { TourProvider } from "@/components/onboarding/tour-provider";
 
 export default function ProjectShell() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -38,11 +39,13 @@ export default function ProjectShell() {
   }
 
   return (
-    <div className="flex h-full flex-1 overflow-hidden">
-      <div className="h-full flex-1 overflow-hidden">
-        <Outlet />
+    <TourProvider>
+      <div className="flex h-full flex-1 overflow-hidden">
+        <div className="h-full flex-1 overflow-hidden">
+          <Outlet />
+        </div>
+        <RightPanel isCanvasRoute={isCanvasRoute} />
       </div>
-      <RightPanel isCanvasRoute={isCanvasRoute} />
-    </div>
+    </TourProvider>
   );
 }

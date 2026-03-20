@@ -19,7 +19,7 @@ export default function CanvasPage() {
   if (!projectId) return null;
 
   return (
-    <div className="relative flex h-full">
+    <div data-tour="canvas-area" className="relative flex h-full">
       <div className="relative flex-1">
         <FlowCanvas />
         <NodePalette />

@@ -140,6 +140,7 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
 
   return (
     <div
+      data-tour="right-panel"
       className="relative flex h-full shrink-0 overflow-hidden border-l border-cm-border-primary bg-cm-bg-surface"
       style={{ width: panelWidth, minWidth: 0 }}
     >

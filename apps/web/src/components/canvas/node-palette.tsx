@@ -65,7 +65,7 @@ export function NodePalette() {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger className="absolute top-4 left-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-cm-accent text-white shadow-md transition-colors hover:opacity-90">
+      <SheetTrigger data-tour="node-palette-btn" className="absolute top-4 left-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-cm-accent text-white shadow-md transition-colors hover:opacity-90">
         <Plus className="h-5 w-5" />
       </SheetTrigger>
       <SheetContent side="left" className="max-w-[280px] bg-cm-bg-surface">

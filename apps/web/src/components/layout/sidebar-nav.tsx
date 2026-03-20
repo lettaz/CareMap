@@ -12,15 +12,17 @@ interface SidebarItemProps {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   matchEnd?: boolean;
+  dataTour?: string;
 }
 
-function SidebarItem({ to, icon: Icon, label, matchEnd }: SidebarItemProps) {
+function SidebarItem({ to, icon: Icon, label, matchEnd, dataTour }: SidebarItemProps) {
   return (
     <Tooltip>
       <TooltipTrigger>
         <NavLink
           to={to}
           end={matchEnd}
+          data-tour={dataTour}
           className={({ isActive }) =>
             cn(
               "flex size-10 items-center justify-center rounded-md transition-colors",
@@ -68,7 +70,7 @@ export function SidebarNav() {
   return (
     <>
       {/* Desktop sidebar */}
-      <nav className="hidden md:flex w-14 shrink-0 flex-col items-center border-r border-cm-border-primary bg-cm-bg-surface py-3">
+      <nav data-tour="sidebar-nav" className="hidden md:flex w-14 shrink-0 flex-col items-center border-r border-cm-border-primary bg-cm-bg-surface py-3">
         <SidebarItem to="/" icon={FolderOpen} label="All Projects" matchEnd />
 
         {isInsideProject && projectId && (
@@ -84,6 +86,7 @@ export function SidebarNav() {
                 to={`/projects/${projectId}/dashboard`}
                 icon={LayoutDashboard}
                 label="Dashboard"
+                dataTour="nav-dashboard"
               />
               <SidebarItem
                 to={`/projects/${projectId}/settings`}
