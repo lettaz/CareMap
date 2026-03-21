@@ -332,7 +332,9 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         category: "source",
       }],
     });
-  }, [projectId, nodeId, sourceFileId, node, setPendingMessage]);
+    selectNode(projectId, null);
+    if (!isPanelOpen) togglePanel();
+  }, [projectId, nodeId, sourceFileId, node, setPendingMessage, selectNode, isPanelOpen, togglePanel]);
 
   return (
     <div className="flex w-full flex-col overflow-hidden">

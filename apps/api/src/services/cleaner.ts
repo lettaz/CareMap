@@ -77,7 +77,7 @@ export function buildCleaningScript(
     lines.push("");
   }
 
-  lines.push(`df.to_parquet("${outputPath}", index=False)`);
+  lines.push(`df.to_csv("${outputPath}", index=False)`);
   lines.push(`rows_after = len(df)`);
   lines.push(`print(json.dumps({"rowsBefore": rows_before, "rowsAfter": rows_after, "columnsCleaned": ${actions.length}, "summary": summary}))`);
 
@@ -104,7 +104,7 @@ export async function executeCleaning(
 
   const fileUrls = await getSignedFileUrls([sourceFile.storage_path]);
   const preamble = buildFileDownloadPreamble(fileUrls);
-  const outputFilePath = "/tmp/output/cleaned.parquet";
+  const outputFilePath = "/tmp/output/cleaned.csv";
   const script = buildCleaningScript(actions, sourceFile.storage_path.split("/").pop()!, outputFilePath);
 
   const fullCode = `
@@ -115,8 +115,8 @@ os.makedirs("/tmp/output", exist_ok=True)
 ${script}
 
 with open("${outputFilePath}", "rb") as f:
-    _parquet_bytes = f.read()
-print("__PARQUET_SIZE__:" + str(len(_parquet_bytes)))
+    _csv_bytes = f.read()
+print("__CSV_SIZE__:" + str(len(_csv_bytes)))
 `;
 
   const opts: SandboxOptions = { timeoutMs: 60_000, onStdout: onProgress };

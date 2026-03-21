@@ -57,6 +57,8 @@ async function buildParquetBuffer(csvContent: string): Promise<Buffer> {
   const csvBase64 = Buffer.from(csvContent, "utf-8").toString("base64");
 
   const script = `
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyarrow"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 import pandas as pd, base64, io
 
 csv_data = base64.b64decode("${csvBase64}").decode("utf-8")
@@ -67,7 +69,7 @@ with open("/tmp/output.parquet", "rb") as f:
     print(base64.b64encode(f.read()).decode("ascii"))
 `;
 
-  const result = await executeInSandbox(script, [], { timeoutMs: 60_000 });
+  const result = await executeInSandbox(script, [], { timeoutMs: 120_000 });
   if (result.exitCode !== 0) {
     throw new Error(`Parquet conversion failed: ${result.stderr}`);
   }

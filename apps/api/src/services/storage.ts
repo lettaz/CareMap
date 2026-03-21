@@ -7,7 +7,7 @@ export function rawPath(projectId: string, sourceFileId: string): string {
 }
 
 export function cleanedPath(projectId: string, sourceFileId: string): string {
-  return `cleaned/${projectId}/${sourceFileId}/cleaned.parquet`;
+  return `cleaned/${projectId}/${sourceFileId}/cleaned.csv`;
 }
 
 export function harmonizedDir(projectId: string): string {

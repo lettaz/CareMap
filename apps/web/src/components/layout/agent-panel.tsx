@@ -253,21 +253,16 @@ export function AgentPanel() {
     const nodeId = matchedNode?.id ?? nodeContext.nodeId;
     const category = matchedNode?.data.category ?? "source";
 
-    if (sfId) {
-      queueMicrotask(() => {
+    queueMicrotask(() => {
+      if (sfId) {
         setMentions((prev) => {
           if (prev.some((m) => m.id === nodeId)) return prev;
           return [...prev, { label: filename, id: nodeId, sourceFileId: sfId, category }];
         });
-        setDraft("Profile and suggest mappings");
-        textareaRef.current?.focus();
-      });
-    } else {
-      queueMicrotask(() => {
-        setDraft(`Tell me about "${nodeContext.label}"`);
-        textareaRef.current?.focus();
-      });
-    }
+      }
+      setDraft("");
+      textareaRef.current?.focus();
+    });
     setNodeContext(null);
     setTimeout(() => { nodeContextConsumedRef.current = null; }, 2000);
   }, [nodeContext, projectId, setNodeContext, pipelineNodes]);
