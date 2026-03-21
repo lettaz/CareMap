@@ -69,7 +69,8 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
   if (ctx.sources.length > 0) {
     sections.push("\n## Source Files");
     for (const s of ctx.sources) {
-      sections.push(`- ${s.filename} (${s.rowCount ?? "?"} rows, status: ${s.status})`);
+      const cleanedNote = s.hasCleanedVersion ? " [cleaned version available]" : "";
+      sections.push(`- ${s.filename} (sourceFileId: ${s.id}, ${s.rowCount ?? "?"} rows, status: ${s.status}${cleanedNote})`);
       if (s.columns.length > 0) {
         const colList = s.columns.map((c) => `${c.name} [${c.type}${c.semanticLabel ? `: ${c.semanticLabel}` : ""}]`).join(", ");
         sections.push(`  Columns: ${colList}`);

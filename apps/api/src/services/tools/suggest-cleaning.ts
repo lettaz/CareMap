@@ -3,9 +3,10 @@ import { z } from "zod";
 import { getModel } from "../../config/ai.js";
 import { generateText } from "ai";
 import { supabase } from "../../config/supabase.js";
+import { getActionCode, type CleaningAction } from "../cleaner.js";
 
 export const suggestCleaningTool = tool({
-  description: "Given source profiles with quality flags, propose a structured cleaning plan with specific actions per column. Returns actions list for user review before execution.",
+  description: "Given source profiles with quality flags, propose a structured cleaning plan with specific actions per column. Returns actions list with Python code previews for user review before execution.",
   inputSchema: z.object({
     sourceFileId: z.string().uuid(),
   }),
@@ -40,6 +41,7 @@ For each column that needs cleaning, output a JSON action:
   "reason": "Why this action is needed"
 }
 
+For fillNulls, specify params.strategy ("drop" | "mean" | "median" | "mode" | "value") and params.value if strategy is "value".
 Only propose actions for columns that genuinely need cleaning.
 Return a JSON object: { "actions": [...], "summary": "Brief explanation" }`,
         },
@@ -57,9 +59,15 @@ Return a JSON object: { "actions": [...], "summary": "Brief explanation" }`,
       summary: string;
     };
 
+    const actionsWithCode = result.actions.map((a, i) => ({
+      ...a,
+      step: i + 1,
+      code: getActionCode(a as CleaningAction),
+    }));
+
     return {
       sourceFileId,
-      actions: result.actions,
+      actions: actionsWithCode,
       summary: result.summary,
       actionCount: result.actions.length,
     };

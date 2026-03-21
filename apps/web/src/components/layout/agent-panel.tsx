@@ -4,15 +4,10 @@ import {
   Sparkles,
   Square,
   SendHorizonal,
-  FileSpreadsheet,
   Paperclip,
   ChevronDown,
   ChevronRight,
   X,
-  Database,
-  GitMerge,
-  ShieldCheck,
-  HardDriveDownload,
   Loader2,
   Plus,
   MessageSquare,
@@ -41,12 +36,12 @@ import {
 } from "@/components/ai-elements/suggestion";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { ToolResultRenderer } from "@/components/agent/tool-result-renderer";
+import { ChatEditor, type ChatEditorHandle } from "@/components/agent/chat-editor";
 import { CareMapMark } from "@/components/shared/caremap-logo";
+import { buildMentionMarkup } from "@/lib/mention-markup";
 import { cn } from "@/lib/utils";
-import type { NodeCategory } from "@/lib/types";
 
 const DESTRUCTIVE_TOOLS = new Set([
-  "execute_cleaning",
   "run_harmonization",
   "confirm_mappings",
   "run_script",
@@ -122,29 +117,6 @@ const MODEL_OPTIONS = [
   { value: "claude-sonnet", label: "Claude Sonnet" },
 ] as const;
 
-interface MentionChip {
-  label: string;
-  id: string;
-  sourceFileId?: string;
-  category: NodeCategory;
-}
-
-const CATEGORY_ICONS: Record<string, typeof Database> = {
-  source: Database,
-  transform: GitMerge,
-  harmonize: Database,
-  quality: ShieldCheck,
-  sink: HardDriveDownload,
-};
-
-const CATEGORY_COLORS: Record<string, string> = {
-  source: "bg-blue-50 text-blue-700",
-  transform: "bg-violet-50 text-violet-700",
-  harmonize: "bg-cyan-50 text-cyan-700",
-  quality: "bg-amber-50 text-amber-700",
-  sink: "bg-emerald-50 text-emerald-700",
-};
-
 function extractInputSnippet(toolName: string, input: unknown): string | null {
   if (!input || typeof input !== "object") return null;
   const inp = input as Record<string, unknown>;
@@ -174,25 +146,6 @@ function extractInputSnippet(toolName: string, input: unknown): string | null {
 }
 
 const _consumedPendingKeys = new Set<string>();
-
-function buildMentionMarkup(mention: MentionChip): string {
-  const ref = mention.sourceFileId ?? mention.id;
-  const tag = `@[${mention.label}](${ref})`;
-
-  switch (mention.category) {
-    case "transform":
-      return `${tag} [transform node — can generate schema & field mappings]`;
-    case "harmonize":
-      return `${tag} [harmonize node — can run harmonization on accepted mappings]`;
-    case "quality":
-      return `${tag} [quality check node — can run data quality checks]`;
-    case "sink":
-      return `${tag} [export/store node — can export harmonized data]`;
-    default:
-      return tag;
-  }
-}
-
 const EMPTY_NODES: never[] = [];
 
 export function AgentPanel() {
@@ -224,31 +177,17 @@ export function AgentPanel() {
     [sessions, activeSessionId],
   );
 
-  const [draft, setDraft] = useState("");
-  const [mentions, setMentions] = useState<MentionChip[]>([]);
+  const editorRef = useRef<ChatEditorHandle>(null);
+  const [editorEmpty, setEditorEmpty] = useState(true);
   const [model, setModel] = useState("auto");
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const [mentionIdx, setMentionIdx] = useState(0);
-  const [mentionTriggerPos, setMentionTriggerPos] = useState<number | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mentionListRef = useRef<HTMLDivElement>(null);
 
   const initialMessages = useMemo(
     () => activeSession?.messages ?? [],
     [activeSession?.id],
   );
-
-  const filteredNodes = useMemo(() => {
-    if (mentionQuery === null) return [];
-    const q = mentionQuery.toLowerCase();
-    const alreadyMentioned = new Set(mentions.map((m) => m.id));
-    return pipelineNodes
-      .filter((n) => !alreadyMentioned.has(n.id) && n.data.label.toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [mentionQuery, pipelineNodes, mentions]);
 
   const transport = useMemo(
     () => new DefaultChatTransport({
@@ -284,8 +223,7 @@ export function AgentPanel() {
     if (!projectId) return;
     createSession(projectId);
     setMessages([]);
-    setDraft("");
-    setMentions([]);
+    editorRef.current?.clear();
     setShowSessionList(false);
   }, [projectId, createSession, setMessages]);
 
@@ -294,8 +232,7 @@ export function AgentPanel() {
     switchSession(projectId, sessionId);
     const session = sessions.find((s) => s.id === sessionId);
     setMessages(session?.messages ?? []);
-    setDraft("");
-    setMentions([]);
+    editorRef.current?.clear();
     setShowSessionList(false);
   }, [projectId, switchSession, sessions, setMessages]);
 
@@ -307,7 +244,6 @@ export function AgentPanel() {
     }
     setShowSessionList(false);
   }, [projectId, deleteSession, activeSessionId, setMessages]);
-
 
   const nodeContextConsumedRef = useRef<string | null>(null);
 
@@ -325,13 +261,14 @@ export function AgentPanel() {
 
     queueMicrotask(() => {
       if (sfId) {
-        setMentions((prev) => {
-          if (prev.some((m) => m.id === nodeId)) return prev;
-          return [...prev, { label: filename, id: nodeId, sourceFileId: sfId, category }];
+        editorRef.current?.insertMention({
+          id: nodeId,
+          label: filename,
+          category,
+          sourceFileId: sfId,
         });
       }
-      setDraft("");
-      textareaRef.current?.focus();
+      editorRef.current?.focus();
     });
     setNodeContext(null);
     setTimeout(() => { nodeContextConsumedRef.current = null; }, 2000);
@@ -377,138 +314,32 @@ export function AgentPanel() {
     activeTransformRef.current = null;
   }, [status, projectId, updateNodeData]);
 
-  const insertMention = useCallback(
-    (node: { id: string; data: { label: string; category: NodeCategory; sourceFileId?: string } }) => {
-      setMentions((prev) => {
-        if (prev.some((m) => m.id === node.id)) return prev;
-        return [...prev, {
-          label: node.data.label,
-          id: node.id,
-          sourceFileId: node.data.sourceFileId as string | undefined,
-          category: node.data.category,
-        }];
-      });
-
-      if (mentionTriggerPos !== null) {
-        const before = draft.slice(0, mentionTriggerPos);
-        const afterAt = draft.slice(mentionTriggerPos);
-        const spaceIdx = afterAt.search(/\s/);
-        const after = spaceIdx === -1 ? "" : afterAt.slice(spaceIdx);
-        setDraft(before + after.trimStart());
-      }
-
-      setMentionQuery(null);
-      setMentionTriggerPos(null);
-      setMentionIdx(0);
-      setTimeout(() => textareaRef.current?.focus(), 0);
+  const handleEditorSend = useCallback(
+    (text: string) => {
+      if (!projectId) return;
+      if (!activeSessionId) createSession(projectId);
+      sendMessage({ text });
     },
-    [draft, mentionTriggerPos],
+    [projectId, activeSessionId, createSession, sendMessage],
   );
 
-  const removeMention = useCallback((id: string) => {
-    setMentions((prev) => prev.filter((m) => m.id !== id));
-  }, []);
-
-  const handleSend = useCallback(() => {
-    if (!projectId) return;
-    if (!draft.trim() && mentions.length === 0) return;
-
-    if (!activeSessionId) createSession(projectId);
-
-    const mentionParts = mentions.map(buildMentionMarkup).join(" ");
-    const text = mentionParts ? `${mentionParts} ${draft.trim()}` : draft.trim();
-    sendMessage({ text });
-    setDraft("");
-    setMentions([]);
-    setMentionQuery(null);
-    setMentionTriggerPos(null);
-  }, [draft, mentions, sendMessage, projectId, activeSessionId, createSession]);
+  const handleManualSend = useCallback(() => {
+    const text = editorRef.current?.getSerializedContent();
+    if (!text?.trim()) return;
+    handleEditorSend(text);
+    editorRef.current?.clear();
+  }, [handleEditorSend]);
 
   const handleSuggestionClick = useCallback(
     (suggestion: string) => {
-      setDraft(suggestion);
-      setTimeout(() => textareaRef.current?.focus(), 0);
+      handleEditorSend(suggestion);
     },
-    [],
-  );
-
-  const autoResize = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, []);
-
-  const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const value = e.target.value;
-      const cursor = e.target.selectionStart ?? value.length;
-      setDraft(value);
-
-      const textBeforeCursor = value.slice(0, cursor);
-      const atMatch = textBeforeCursor.match(/@(\w*)$/);
-
-      if (atMatch) {
-        setMentionQuery(atMatch[1]);
-        setMentionTriggerPos(textBeforeCursor.length - atMatch[0].length);
-        setMentionIdx(0);
-      } else {
-        setMentionQuery(null);
-        setMentionTriggerPos(null);
-      }
-
-      autoResize();
-    },
-    [autoResize],
-  );
-
-  useEffect(() => {
-    autoResize();
-  }, [draft, autoResize]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (mentionQuery !== null && filteredNodes.length > 0) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setMentionIdx((i) => Math.min(i + 1, filteredNodes.length - 1));
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setMentionIdx((i) => Math.max(i - 1, 0));
-          return;
-        }
-        if (e.key === "Enter" || e.key === "Tab") {
-          e.preventDefault();
-          insertMention(filteredNodes[mentionIdx]);
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          setMentionQuery(null);
-          setMentionTriggerPos(null);
-          return;
-        }
-      }
-
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleSend();
-      }
-
-      if (e.key === "Backspace" && draft === "" && mentions.length > 0) {
-        e.preventDefault();
-        setMentions((prev) => prev.slice(0, -1));
-      }
-    },
-    [handleSend, mentionQuery, filteredNodes, mentionIdx, insertMention, draft, mentions],
+    [handleEditorSend],
   );
 
   const isStreaming = status === "streaming" || status === "submitted";
   const hasMessages = messages.length > 0;
   const selectedModel = MODEL_OPTIONS.find((m) => m.value === model) ?? MODEL_OPTIONS[0];
-  const showMentionMenu = mentionQuery !== null && filteredNodes.length > 0;
 
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden bg-cm-bg-app">
@@ -668,81 +499,16 @@ export function AgentPanel() {
         <AgentEmptyState onSuggestionClick={handleSuggestionClick} />
       )}
 
-      {/* Input area — bottom, no divider */}
+      {/* Input area */}
       <div className="shrink-0 px-3 pt-2 pb-3">
         <div className="relative flex flex-col rounded-xl border border-cm-border-primary bg-cm-bg-surface shadow-sm">
-          {mentions.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5 pb-0">
-              {mentions.map((m) => {
-                const Icon = CATEGORY_ICONS[m.category] ?? Database;
-                const colorClass = CATEGORY_COLORS[m.category] ?? CATEGORY_COLORS.source;
-                return (
-                  <span
-                    key={m.id}
-                    className={cn("inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium", colorClass)}
-                  >
-                    <Icon className="h-3 w-3" />
-                    {m.label}
-                    <button
-                      type="button"
-                      onClick={() => removeMention(m.id)}
-                      className="ml-0.5 rounded-sm opacity-60 hover:opacity-100 transition-opacity"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
-          )}
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder={mentions.length > 0 ? "Type your question..." : "Ask anything about your data... (@ to mention a node)"}
-            rows={1}
-            className="w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-xs text-cm-text-primary placeholder:text-cm-text-tertiary outline-none"
-            style={{ maxHeight: 160 }}
+          <ChatEditor
+            ref={editorRef}
+            onSend={handleEditorSend}
+            onEmptyChange={setEditorEmpty}
+            pipelineNodes={pipelineNodes}
+            disabled={isStreaming}
           />
-
-          {/* @ mention autocomplete */}
-          {showMentionMenu && (
-            <div
-              ref={mentionListRef}
-              className="absolute bottom-full left-0 right-0 z-50 mb-1 mx-1 max-h-52 overflow-y-auto rounded-lg border border-cm-border-primary bg-cm-bg-surface py-1 shadow-lg"
-            >
-              <p className="px-3 py-1 text-[10px] font-medium text-cm-text-tertiary uppercase tracking-wide">
-                Pipeline nodes
-              </p>
-              {filteredNodes.map((node, i) => {
-                const Icon = CATEGORY_ICONS[node.data.category] ?? Database;
-                const subtitle = node.data.sourceFileId
-                  ? String(node.data.sourceFileId).slice(0, 8)
-                  : node.id.slice(0, 8);
-                return (
-                  <button
-                    key={node.id}
-                    type="button"
-                    onClick={() => insertMention(node)}
-                    className={cn(
-                      "flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors",
-                      i === mentionIdx
-                        ? "bg-cm-accent-subtle text-cm-accent"
-                        : "text-cm-text-secondary hover:bg-cm-bg-hover"
-                    )}
-                  >
-                    <Icon className="h-3.5 w-3.5 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <span className="block truncate font-medium">{node.data.label}</span>
-                      <span className="block truncate text-[10px] text-cm-text-tertiary">{subtitle}</span>
-                    </div>
-                    <span className="text-[10px] text-cm-text-tertiary capitalize shrink-0">{node.data.category}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
 
           <div className="flex items-center justify-between px-1.5 pb-1.5">
             <div className="flex items-center gap-1">
@@ -803,8 +569,8 @@ export function AgentPanel() {
             ) : (
               <Button
                 size="icon"
-                onClick={handleSend}
-                disabled={!draft.trim() && mentions.length === 0}
+                onClick={handleManualSend}
+                disabled={editorEmpty}
                 className="h-7 w-7 rounded-lg bg-cm-accent text-white hover:bg-cm-accent-hover disabled:opacity-40"
               >
                 <SendHorizonal className="h-3.5 w-3.5" />
@@ -824,7 +590,7 @@ interface ChatMessageProps {
 }
 
 function renderMentions(text: string): ReactNode {
-  const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
+  const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)(\s*\[[^\]]*\])?/g;
   const parts: ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -836,10 +602,9 @@ function renderMentions(text: string): ReactNode {
     parts.push(
       <span
         key={match.index}
-        className="inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700 align-middle"
+        className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 align-baseline"
       >
-        <FileSpreadsheet className="h-3 w-3" />
-        {match[1]}
+        @{match[1]}
       </span>,
     );
     lastIndex = match.index + match[0].length;
@@ -956,9 +721,14 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
               || toolName === "propose_mappings";
 
             const RESULT_LABELS: Record<string, string> = {
+              profile_columns: "Column Profile",
               suggest_cleaning: "Cleaning Plan Ready",
+              execute_cleaning: "Cleaning Complete",
               propose_target_schema: "Target Schema Proposed",
               propose_mappings: "Field Mappings Ready",
+              run_harmonization: "Harmonization Complete",
+              run_query: "Query Results",
+              generate_artifact: "Artifact Generated",
             };
             const displayLabel = RESULT_LABELS[toolName] ?? label;
             return (

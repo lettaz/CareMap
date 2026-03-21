@@ -1,7 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { executeCleaning, type CleaningAction } from "../cleaner.js";
-import { isYoloMode } from "../../lib/yolo.js";
 import { logBulkCorrections } from "../corrections.js";
 
 const cleaningActionSchema = z.object({
@@ -12,13 +11,16 @@ const cleaningActionSchema = z.object({
 });
 
 export const executeCleaningTool = tool({
-  description: "Apply the approved cleaning plan to a source file. Runs pandas transforms in an E2B sandbox and writes a cleaned file to Supabase Storage.",
+  description:
+    "Apply the approved cleaning plan to a source file. Runs pandas transforms in an E2B sandbox " +
+    "and writes a cleaned file to Supabase Storage. The cleaned file is stored alongside the original; " +
+    "the original source is preserved. Returns per-step results so the user can see each action's impact.",
   inputSchema: z.object({
     projectId: z.string().uuid(),
     sourceFileId: z.string().uuid(),
     actions: z.array(cleaningActionSchema),
   }),
-  needsApproval: async (input) => !(await isYoloMode(input.projectId)),
+  needsApproval: false,
   execute: async ({ projectId, sourceFileId, actions }) => {
     try {
       const result = await executeCleaning(projectId, sourceFileId, actions as CleaningAction[]);
@@ -36,7 +38,13 @@ export const executeCleaningTool = tool({
 
       return {
         success: true,
-        ...result,
+        sourceFileId,
+        rowsBefore: result.rowsBefore,
+        rowsAfter: result.rowsAfter,
+        columnsCleaned: result.columnsCleaned,
+        steps: result.steps,
+        cleanedStoragePath: result.cleanedStoragePath,
+        summary: result.summary,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "react-router-dom";
+import { Save, Check } from "lucide-react";
+import { toast } from "sonner";
 import { Slider } from "@/components/ui/slider";
+import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/lib/stores/project-store";
 
 interface ThresholdSettings {
@@ -16,34 +19,39 @@ export function MappingThresholds() {
   const saved = (project?.settings?.thresholds ?? {}) as Partial<ThresholdSettings>;
   const [autoAccept, setAutoAccept] = useState(saved.autoAccept ?? 0.85);
   const [review, setReview] = useState(saved.review ?? 0.6);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (saved.autoAccept != null) setAutoAccept(saved.autoAccept);
     if (saved.review != null) setReview(saved.review);
   }, [saved.autoAccept, saved.review]);
 
-  const persist = useCallback(
-    (next: ThresholdSettings) => {
-      if (!project) return;
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        updateProjectSettings(project.id, { thresholds: next });
-      }, 600);
-    },
-    [project, updateProjectSettings],
-  );
+  const hasChanges =
+    autoAccept !== (saved.autoAccept ?? 0.85) || review !== (saved.review ?? 0.6);
+
+  const handleSave = useCallback(async () => {
+    if (!project || saving) return;
+    setSaving(true);
+    try {
+      await updateProjectSettings(project.id, {
+        thresholds: { autoAccept, review },
+      });
+      toast.success("Thresholds saved");
+    } catch {
+      toast.error("Failed to save thresholds");
+    } finally {
+      setSaving(false);
+    }
+  }, [project, autoAccept, review, saving, updateProjectSettings]);
 
   function handleAutoAccept(val: number | readonly number[]) {
     const v = (Array.isArray(val) ? val[0] : (val as number)) / 100;
     setAutoAccept(v);
-    persist({ autoAccept: v, review });
   }
 
   function handleReview(val: number | readonly number[]) {
     const v = (Array.isArray(val) ? val[0] : (val as number)) / 100;
     setReview(v);
-    persist({ autoAccept, review: v });
   }
 
   return (
@@ -83,6 +91,27 @@ export function MappingThresholds() {
           step={1}
         />
       </div>
+
+      <Button
+        onClick={handleSave}
+        disabled={!hasChanges || saving}
+        className="w-full gap-2"
+        size="sm"
+      >
+        {saving ? (
+          <>Saving...</>
+        ) : hasChanges ? (
+          <>
+            <Save className="h-3.5 w-3.5" />
+            Save Thresholds
+          </>
+        ) : (
+          <>
+            <Check className="h-3.5 w-3.5" />
+            Saved
+          </>
+        )}
+      </Button>
 
       <div className="rounded-lg border border-cm-border-subtle bg-cm-bg-elevated p-3 text-xs leading-relaxed text-cm-text-secondary space-y-1.5">
         <p>

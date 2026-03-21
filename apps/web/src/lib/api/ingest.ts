@@ -38,11 +38,15 @@ export function fetchDetailedProfile(sourceFileId: string): Promise<DetailedProf
 export function fetchSampleRows(
   sourceFileId: string,
   pagination?: { page: number; pageSize: number },
+  version?: "original" | "cleaned",
 ): Promise<PaginatedResponse<Record<string, unknown>>> {
   const params = new URLSearchParams();
   if (pagination) {
     params.set("page", String(pagination.page));
     params.set("pageSize", String(pagination.pageSize));
+  }
+  if (version && version !== "original") {
+    params.set("version", version);
   }
   const qs = params.toString();
   return apiFetch<PaginatedResponse<Record<string, unknown>>>(

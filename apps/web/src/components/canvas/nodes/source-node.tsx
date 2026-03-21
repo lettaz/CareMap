@@ -3,7 +3,9 @@ import type { NodeProps } from "@xyflow/react";
 import type { PipelineNode } from "@/lib/types";
 import { FileSpreadsheet, FileText, FileType2, Upload } from "lucide-react";
 import { useNodeRename } from "@/hooks/use-node-rename";
+import { useNodeHover } from "@/hooks/use-node-hover";
 import { NodeLabelInput } from "@/components/canvas/nodes/node-label-input";
+import { NodeActionToolbar } from "@/components/canvas/nodes/node-action-toolbar";
 import { cn } from "@/lib/utils";
 
 const FILE_TYPE_ICONS: Record<string, typeof FileSpreadsheet> = {
@@ -22,13 +24,25 @@ const FILE_TYPE_LABELS: Record<string, string> = {
 
 export function SourceNode({ id, data }: NodeProps<PipelineNode>) {
   const rename = useNodeRename(id, data.label);
+  const { isHovered, hoverProps } = useNodeHover();
   const hasData = data.status !== "idle" && data.rowCount;
   const FileIcon = data.fileType ? FILE_TYPE_ICONS[data.fileType] ?? Upload : Upload;
   const hasIssues = (data.issueCount ?? 0) > 0;
   const isWarningOrError = data.status === "warning" || data.status === "error";
 
   return (
-    <div className="relative w-[260px] rounded-lg border border-cm-border-primary bg-white shadow-sm transition-shadow hover:shadow-md">
+    <div
+      className="relative w-[260px] rounded-lg border border-cm-border-primary bg-white shadow-sm transition-shadow hover:shadow-md"
+      {...hoverProps}
+    >
+      <NodeActionToolbar
+        nodeId={id}
+        label={data.label}
+        category="source"
+        sourceFileId={data.sourceFileId as string | undefined}
+        status={data.status}
+        isVisible={isHovered}
+      />
       {/* Category color bar */}
       <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg bg-cm-node-source" />
 

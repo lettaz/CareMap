@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   MessageCircle, X, AlertTriangle, Filter, Loader2,
-  Database, Server, Globe, Clock, Lock,
+  Database, Server, Globe, Clock, Lock, Sparkles, CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useProjectStore } from "@/lib/stores/project-store";
@@ -24,6 +25,7 @@ import {
 import type { SourcePreview, SourcePreviewColumn } from "@/lib/types";
 
 type PanelPhase = "upload" | "analyzing" | "preview";
+type DataView = "original" | "cleaned";
 
 interface SourceDetailPanelProps {
   nodeId: string;
@@ -48,7 +50,9 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const selectNode = usePipelineStore((s) => s.selectNode);
   const updateNodeData = usePipelineStore((s) => s.updateNodeData);
 
-  const hasExistingData = !!node?.data.sourceFileId && node?.data.status === "ready";
+  const nodeStatus = node?.data.status as string | undefined;
+  const hasExistingData = !!node?.data.sourceFileId && nodeStatus === "ready";
+  const hasCleanedVersion = !!(node?.data.hasCleanedVersion) || nodeStatus === "clean";
   const sourceFileId = node?.data.sourceFileId as string | undefined;
 
   const [phase, setPhase] = useState<PanelPhase>(hasExistingData ? "preview" : "upload");
@@ -56,9 +60,12 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const [steps, setSteps] = useState<AnalysisStep[]>([]);
   const [profile, setProfile] = useState<DetailedProfileDTO | null>(null);
   const [sampleRows, setSampleRows] = useState<Record<string, unknown>[] | null>(null);
+  const [cleanedSampleRows, setCleanedSampleRows] = useState<Record<string, unknown>[] | null>(null);
+  const [cleanedTotal, setCleanedTotal] = useState<number | null>(null);
   const [showIssuesOnly, setShowIssuesOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sourceTab, setSourceTab] = useState<"data" | "ingestion">("data");
+  const [dataView, setDataView] = useState<DataView>("original");
   const prevNodeId = useRef(nodeId);
 
   useEffect(() => {
@@ -66,11 +73,26 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
       prevNodeId.current = nodeId;
       setProfile(null);
       setSampleRows(null);
+      setCleanedSampleRows(null);
+      setCleanedTotal(null);
       setShowIssuesOnly(false);
       setError(null);
+      setDataView("original");
       setPhase(hasExistingData ? "preview" : "upload");
     }
   }, [nodeId, hasExistingData]);
+
+  useEffect(() => {
+    if (!hasCleanedVersion || !sourceFileId || dataView !== "cleaned") return;
+    if (cleanedSampleRows) return;
+
+    fetchSampleRows(sourceFileId, { page: 1, pageSize: 20 }, "cleaned")
+      .then((res) => {
+        setCleanedSampleRows(res.data as Record<string, unknown>[]);
+        setCleanedTotal(res.total);
+      })
+      .catch(() => setCleanedSampleRows([]));
+  }, [hasCleanedVersion, sourceFileId, dataView, cleanedSampleRows]);
 
   useEffect(() => {
     if (!hasExistingData || !sourceFileId) return;
@@ -379,7 +401,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         </div>
       )}
 
-      {phase !== "analyzing" && (
+      {phase === "upload" && (
         <div className="flex items-center gap-0.5 border-b border-cm-border-primary px-4 shrink-0">
           <button
             onClick={() => setSourceTab("data")}
@@ -389,7 +411,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                 : "border-transparent text-cm-text-tertiary hover:text-cm-text-secondary"
             }`}
           >
-            Data
+            Upload
           </button>
           <button
             onClick={() => setSourceTab("ingestion")}
@@ -412,7 +434,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         />
       )}
 
-      {sourceTab === "ingestion" && phase !== "analyzing" && (
+      {sourceTab === "ingestion" && phase === "upload" && (
         <div className="flex-1 overflow-y-auto">
           <WebhookConfigPanel projectId={projectId} nodeId={nodeId} />
           <UpcomingConnectors />
@@ -429,28 +451,66 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         <>
           <SourceSummaryBar preview={preview} onAiClick={handleOpenChat} onRequestCleanup={handleRequestCleanup} />
 
-          {preview.issueCount > 0 && (
-            <div className="flex items-center justify-between border-b border-cm-border-primary px-4 py-2 shrink-0">
+          {hasCleanedVersion && (
+            <div className="flex items-center gap-1 border-b border-cm-border-primary px-4 shrink-0">
               <button
-                onClick={() => setShowIssuesOnly(!showIssuesOnly)}
-                className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-                  showIssuesOnly
-                    ? "bg-cm-warning-subtle text-cm-warning"
-                    : "bg-cm-bg-elevated text-cm-text-secondary hover:bg-cm-bg-hover"
+                onClick={() => setDataView("original")}
+                className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+                  dataView === "original"
+                    ? "border-cm-accent text-cm-accent"
+                    : "border-transparent text-cm-text-tertiary hover:text-cm-text-secondary"
                 }`}
               >
-                {showIssuesOnly ? <AlertTriangle className="h-3 w-3" /> : <Filter className="h-3 w-3" />}
-                {showIssuesOnly ? `${preview.issueCount} issues` : `Show ${preview.issueCount} issues`}
+                Original
               </button>
-              <span className="text-[10px] text-cm-text-tertiary">
-                {showIssuesOnly ? "Showing issue columns" : "Showing all columns"}
-              </span>
+              <button
+                onClick={() => setDataView("cleaned")}
+                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+                  dataView === "cleaned"
+                    ? "border-emerald-500 text-emerald-600"
+                    : "border-transparent text-cm-text-tertiary hover:text-cm-text-secondary"
+                }`}
+              >
+                <Sparkles className="h-3 w-3" />
+                Cleaned
+              </button>
             </div>
           )}
 
-          <div className="flex-1 overflow-auto">
-            <SourceDataTable preview={preview} showIssuesOnly={showIssuesOnly} />
-          </div>
+          {dataView === "original" && (
+            <>
+              {preview.issueCount > 0 && (
+                <div className="flex items-center justify-between border-b border-cm-border-primary px-4 py-2 shrink-0">
+                  <button
+                    onClick={() => setShowIssuesOnly(!showIssuesOnly)}
+                    className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                      showIssuesOnly
+                        ? "bg-cm-warning-subtle text-cm-warning"
+                        : "bg-cm-bg-elevated text-cm-text-secondary hover:bg-cm-bg-hover"
+                    }`}
+                  >
+                    {showIssuesOnly ? <AlertTriangle className="h-3 w-3" /> : <Filter className="h-3 w-3" />}
+                    {showIssuesOnly ? `${preview.issueCount} issues` : `Show ${preview.issueCount} issues`}
+                  </button>
+                  <span className="text-[10px] text-cm-text-tertiary">
+                    {showIssuesOnly ? "Showing issue columns" : "Showing all columns"}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex-1 overflow-auto">
+                <SourceDataTable preview={preview} showIssuesOnly={showIssuesOnly} />
+              </div>
+            </>
+          )}
+
+          {dataView === "cleaned" && (
+            <CleanedDataView
+              sampleRows={cleanedSampleRows}
+              totalRows={cleanedTotal}
+              columns={preview.columns}
+            />
+          )}
         </>
       )}
 
@@ -537,6 +597,96 @@ const UPCOMING_CONNECTORS = [
     color: "text-amber-600 bg-amber-50",
   },
 ] as const;
+
+function CleanedDataView({
+  sampleRows,
+  totalRows,
+  columns,
+}: {
+  sampleRows: Record<string, unknown>[] | null;
+  totalRows: number | null;
+  columns: SourcePreviewColumn[];
+}) {
+  if (!sampleRows) {
+    return (
+      <div className="flex flex-1 items-center justify-center py-12">
+        <Loader2 className="h-5 w-5 animate-spin text-cm-accent" />
+      </div>
+    );
+  }
+
+  if (sampleRows.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center py-12 gap-2 text-cm-text-tertiary">
+        <AlertTriangle className="h-5 w-5" />
+        <p className="text-xs">Could not load cleaned data preview</p>
+      </div>
+    );
+  }
+
+  const colNames = columns.map((c) => c.name);
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-cm-border-primary bg-emerald-50/50 shrink-0">
+        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+        <span className="text-xs font-medium text-emerald-700">Cleaned version</span>
+        {totalRows != null && (
+          <Badge variant="outline" className="ml-auto text-[10px] px-1.5 py-0 h-4 border-emerald-300 text-emerald-700">
+            {totalRows.toLocaleString()} rows
+          </Badge>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-cm-bg-elevated">
+              <th className="w-10 border-b border-r border-cm-border-primary px-2 py-2 text-left text-[10px] font-medium text-cm-text-tertiary">
+                #
+              </th>
+              {colNames.map((col) => (
+                <th
+                  key={col}
+                  className="border-b border-r border-cm-border-primary px-2 py-1.5 text-left font-mono text-[11px] font-medium text-cm-text-primary"
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sampleRows.map((row, rowIdx) => (
+              <tr
+                key={rowIdx}
+                className="border-b border-cm-border-subtle transition-colors hover:bg-cm-bg-elevated/50"
+              >
+                <td className="border-r border-cm-border-subtle px-2 py-1.5 text-[10px] text-cm-text-tertiary tabular-nums text-right">
+                  {rowIdx + 1}
+                </td>
+                {colNames.map((colName) => {
+                  const value = row[colName];
+                  const isNull = value === null || value === undefined || value === "";
+                  return (
+                    <td
+                      key={colName}
+                      className={`border-r border-cm-border-subtle px-2 py-1.5 font-mono text-[11px] max-w-[140px] truncate ${
+                        isNull ? "text-cm-text-tertiary italic" : "text-cm-text-primary"
+                      }`}
+                      title={isNull ? "NULL" : String(value)}
+                    >
+                      {isNull ? "NULL" : String(value)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function UpcomingConnectors() {
   return (

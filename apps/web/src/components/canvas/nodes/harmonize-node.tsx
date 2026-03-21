@@ -3,16 +3,20 @@ import type { NodeProps } from "@xyflow/react";
 import type { PipelineNode } from "@/lib/types";
 import { Layers, Clock } from "lucide-react";
 import { useNodeRename } from "@/hooks/use-node-rename";
+import { useNodeHover } from "@/hooks/use-node-hover";
 import { NodeLabelInput } from "./node-label-input";
+import { NodeActionToolbar } from "./node-action-toolbar";
 import { cn } from "@/lib/utils";
 
 export function HarmonizeNode({ id, data }: NodeProps<PipelineNode>) {
   const rename = useNodeRename(id, data.label);
+  const { isHovered, hoverProps } = useNodeHover();
   const tableCount = data.tableCount ?? 0;
   const rowCount = data.harmonizedRowCount ?? data.rowCount ?? 0;
   const hasData = tableCount > 0 || rowCount > 0;
   const hasIssues = (data.issueCount ?? 0) > 0;
   const isWarningOrError = data.status === "warning" || data.status === "error";
+  const isStale = !!data.stale;
 
   const description =
     data.description ??
@@ -21,12 +25,21 @@ export function HarmonizeNode({ id, data }: NodeProps<PipelineNode>) {
       : "Merge accepted mappings into canonical tables");
 
   return (
-    <div className="relative w-[260px] rounded-lg border border-cm-border-primary bg-white shadow-sm transition-shadow hover:shadow-md">
+    <div
+      className="relative w-[260px] rounded-lg border border-cm-border-primary bg-white shadow-sm transition-shadow hover:shadow-md"
+      {...hoverProps}
+    >
+      <NodeActionToolbar nodeId={id} label={data.label} category="harmonize" status={data.status} isVisible={isHovered} />
       <div className={cn(
         "absolute left-0 top-0 bottom-0 w-1 rounded-l-lg bg-cm-node-harmonize",
         hasData && "w-1.5",
       )} />
 
+      {isStale && !hasIssues && !isWarningOrError && (
+        <div className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-amber-400" title="Upstream source changed — re-run recommended">
+          <span className="text-[9px] font-bold leading-none text-white">!</span>
+        </div>
+      )}
       {(hasIssues || isWarningOrError) && (
         <div className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-red-500">
           <span className="text-[9px] font-bold leading-none text-white">

@@ -152,9 +152,19 @@ function ExportResult({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+interface StepResult {
+  step: number;
+  column: string;
+  action: string;
+  rowsBefore: number;
+  rowsAfter: number;
+  warning?: string;
+}
+
 function PipelineResult({ data, toolName }: { data: Record<string, unknown>; toolName: string }) {
   const { projectId } = useParams<{ projectId: string }>();
   const selectNode = usePipelineStore((s) => s.selectNode);
+  const updateNodeData = usePipelineStore((s) => s.updateNodeData);
   const pipelineNodes = usePipelineStore((s) =>
     projectId ? s.pipelines[projectId]?.nodes ?? [] : [],
   );
@@ -162,12 +172,30 @@ function PipelineResult({ data, toolName }: { data: Record<string, unknown>; too
   const success = data.success as boolean;
   const isCleaning = toolName === "execute_cleaning";
   const label = isCleaning ? "Cleaning" : "Harmonization";
-  const targetCategory = isCleaning ? "source" : "harmonize";
-  const targetNode = pipelineNodes.find((n) => n.data.category === targetCategory);
+
+  const targetNode = (() => {
+    if (isCleaning && data.sourceFileId) {
+      return pipelineNodes.find(
+        (n) => n.data.category === "source" && n.data.sourceFileId === data.sourceFileId,
+      );
+    }
+    return pipelineNodes.find((n) => n.data.category === (isCleaning ? "source" : "harmonize"));
+  })();
 
   const rowsBefore = data.rowsBefore as number | undefined;
   const rowsAfter = data.rowsAfter as number | undefined;
   const tablesHarmonized = data.tablesHarmonized as number | undefined;
+  const steps = (data.steps as StepResult[] | undefined) ?? [];
+  const hasWarnings = steps.some((s) => s.warning);
+  const [showSteps, setShowSteps] = useState(hasWarnings);
+
+  const handleViewInPanel = useCallback(() => {
+    if (!projectId || !targetNode) return;
+    if (isCleaning && success) {
+      updateNodeData(projectId, targetNode.id, { hasCleanedVersion: true });
+    }
+    selectNode(projectId, targetNode.id);
+  }, [projectId, targetNode, isCleaning, success, updateNodeData, selectNode]);
 
   return (
     <div className={cn(
@@ -186,11 +214,48 @@ function PipelineResult({ data, toolName }: { data: Record<string, unknown>; too
       {success && (rowsBefore != null || tablesHarmonized != null) && (
         <div className="flex items-center gap-3 px-3 py-2 bg-white border-t border-green-100 text-[11px] text-cm-text-secondary">
           {rowsBefore != null && rowsAfter != null && (
-            <span>{rowsBefore} → {rowsAfter} rows</span>
+            <span>{rowsBefore.toLocaleString()} → {rowsAfter.toLocaleString()} rows</span>
           )}
           {tablesHarmonized != null && (
             <span>{tablesHarmonized} table{tablesHarmonized !== 1 ? "s" : ""} harmonized</span>
           )}
+          {isCleaning && steps.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowSteps(!showSteps)}
+              className="ml-auto text-[10px] text-cm-accent hover:underline"
+            >
+              {showSteps ? "Hide steps" : `${steps.length} steps`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {showSteps && steps.length > 0 && (
+        <div className="border-t border-green-100 divide-y divide-cm-border-subtle">
+          {steps.map((step) => {
+            const dropped = step.rowsBefore - step.rowsAfter;
+            const dropPct = step.rowsBefore > 0 ? (dropped / step.rowsBefore * 100) : 0;
+            return (
+              <div key={step.step} className="px-3 py-1.5 flex items-center gap-2 text-[10px]">
+                <span className="text-cm-text-tertiary w-4 tabular-nums text-right">{step.step}</span>
+                <span className="font-mono text-cm-text-primary">{step.column}</span>
+                <span className="rounded bg-cm-bg-elevated px-1 py-0.5 text-cm-text-tertiary capitalize">
+                  {step.action.replace(/([A-Z])/g, " $1").trim()}
+                </span>
+                <span className="ml-auto tabular-nums text-cm-text-secondary">
+                  {step.rowsBefore.toLocaleString()} → {step.rowsAfter.toLocaleString()}
+                </span>
+                {step.warning ? (
+                  <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" aria-label={step.warning} />
+                ) : dropped > 0 ? (
+                  <span className="text-amber-600">-{dropPct.toFixed(1)}%</span>
+                ) : (
+                  <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -200,7 +265,7 @@ function PipelineResult({ data, toolName }: { data: Record<string, unknown>; too
             variant="ghost"
             size="sm"
             className="h-7 gap-1.5 text-[11px] ml-auto"
-            onClick={() => selectNode(projectId, targetNode.id)}
+            onClick={handleViewInPanel}
           >
             <ExternalLink className="h-3 w-3" />
             View in Panel
@@ -873,10 +938,12 @@ const ACTION_ICONS: Record<string, string> = {
 
 function CleaningPlanResult({ data }: { data: Record<string, unknown> }) {
   const actions = data.actions as Array<{
+    step?: number;
     column: string;
     action: string;
     params?: Record<string, unknown>;
     reason: string;
+    code?: string;
   }> | undefined;
   const summary = data.summary as string | undefined;
   const actionCount = (data.actionCount as number) ?? actions?.length ?? 0;
@@ -930,9 +997,9 @@ function CleaningPlanResult({ data }: { data: Record<string, unknown> }) {
                   ? <ChevronDown className="h-3 w-3 text-cm-text-tertiary shrink-0" />
                   : <ChevronRight className="h-3 w-3 text-cm-text-tertiary shrink-0" />}
 
-                <div className="flex h-5 w-5 items-center justify-center rounded bg-amber-100 shrink-0">
-                  <AlertTriangle className="h-2.5 w-2.5 text-amber-600" />
-                </div>
+                <span className="flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-[9px] font-bold text-amber-700 shrink-0">
+                  {action.step ?? i + 1}
+                </span>
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -947,10 +1014,22 @@ function CleaningPlanResult({ data }: { data: Record<string, unknown> }) {
               </button>
 
               {isExpanded && (
-                <div className="bg-cm-bg-elevated/40 px-3 pb-2.5 pl-10 space-y-1.5">
+                <div className="bg-cm-bg-elevated/40 px-3 pb-2.5 pl-10 space-y-2">
                   <p className="text-[11px] text-cm-text-secondary leading-relaxed">
                     {action.reason}
                   </p>
+
+                  {action.code && (
+                    <div className="rounded-md overflow-hidden border border-cm-border-subtle">
+                      <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-800 text-[9px] text-slate-400 font-medium">
+                        <span>Python</span>
+                      </div>
+                      <pre className="px-2.5 py-2 bg-slate-900 text-[10px] text-slate-200 font-mono leading-relaxed overflow-x-auto">
+                        {action.code}
+                      </pre>
+                    </div>
+                  )}
+
                   {action.params && Object.keys(action.params).length > 0 && (
                     <div className="rounded-md border border-cm-border-subtle bg-cm-bg-surface p-2">
                       <p className="text-[9px] font-medium uppercase tracking-wide text-cm-text-tertiary mb-1">

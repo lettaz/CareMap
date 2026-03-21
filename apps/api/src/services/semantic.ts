@@ -18,6 +18,7 @@ export interface SemanticContext {
     filename: string;
     rowCount: number | null;
     status: string;
+    hasCleanedVersion: boolean;
     columns: Array<{
       name: string;
       type: string;
@@ -181,6 +182,7 @@ export async function getSemanticContext(projectId: string): Promise<SemanticCon
       filename: s.filename,
       rowCount: s.row_count,
       status: s.status,
+      hasCleanedVersion: !!s.cleaned_path,
       columns: profiles
         .filter((p) => p.source_file_id === s.id)
         .map((p) => ({

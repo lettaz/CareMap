@@ -19,6 +19,7 @@ import {
   type PipelineEdgeDTO,
 } from "@/lib/api/pipeline";
 import { deleteSourceFile } from "@/lib/api/ingest";
+import { useAgentStore } from "./agent-store";
 
 export interface PipelineData {
   nodes: PipelineNode[];
@@ -301,6 +302,9 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
   },
 
   updateNodeData: (projectId, nodeId, partial) => {
+    const clearStale = partial.status === "ready" || partial.status === "running";
+    const merged = clearStale ? { stale: undefined, ...partial } : partial;
+
     set((state) => {
       const p = getPipeline(state, projectId);
       return {
@@ -308,7 +312,7 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
           ...state.pipelines,
           [projectId]: {
             ...p,
-            nodes: p.nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...partial } } : n)),
+            nodes: p.nodes.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...merged } } : n)),
           },
         },
       };
@@ -319,9 +323,13 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
   removeNode: (projectId, nodeId) => {
     const p = getPipeline(get(), projectId);
     const node = p.nodes.find((n) => n.id === nodeId);
-    const sourceFileId = node?.data.category === "source"
-      ? (node.data.sourceFileId as string | undefined)
-      : undefined;
+    const isSource = node?.data.category === "source";
+    const sourceFileId = isSource ? (node.data.sourceFileId as string | undefined) : undefined;
+
+    const affectedEdges = p.edges.filter((e) => e.source === nodeId || e.target === nodeId);
+    const directTargetIds = affectedEdges
+      .filter((e) => e.source === nodeId)
+      .map((e) => e.target);
 
     set((state) => {
       const pipeline = getPipeline(state, projectId);
@@ -343,6 +351,54 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
       deleteSourceFile(sourceFileId).catch((err) => {
         toast.error("Failed to delete source data", { description: (err as Error).message });
       });
+    }
+
+    if (!isSource) return;
+
+    const updatedPipeline = getPipeline(get(), projectId);
+
+    for (const targetId of directTargetIds) {
+      const targetNode = updatedPipeline.nodes.find((n) => n.id === targetId);
+      if (!targetNode) continue;
+
+      if (targetNode.data.category === "transform") {
+        const remainingSources = updatedPipeline.edges
+          .filter((e) => e.target === targetId)
+          .map((e) => updatedPipeline.nodes.find((n) => n.id === e.source))
+          .filter((n) => n?.data.category === "source" && n.data.sourceFileId);
+
+        if (remainingSources.length > 0) {
+          get().updateNodeData(projectId, targetId, { status: "running" });
+          const agentStore = useAgentStore.getState();
+          agentStore.openPanel();
+          agentStore.setPendingMessage({
+            text: "A source was removed. Re-propose the target schema and field mappings for the remaining connected sources",
+            mentions: remainingSources.map((n) => ({
+              label: n!.data.label,
+              id: n!.id,
+              sourceFileId: n!.data.sourceFileId as string,
+              category: "source" as const,
+            })),
+            transformNodeId: targetId,
+          });
+          toast.info("Re-mapping triggered", { description: "Transform node will update with remaining sources" });
+        } else {
+          get().updateNodeData(projectId, targetId, { status: "idle", schemaStatus: undefined });
+          toast.info("Transform node reset", { description: "No sources connected" });
+        }
+
+        const downstreamIds = updatedPipeline.edges
+          .filter((e) => e.source === targetId)
+          .map((e) => e.target);
+
+        for (const dsId of downstreamIds) {
+          const dsNode = updatedPipeline.nodes.find((n) => n.id === dsId);
+          if (!dsNode) continue;
+          get().updateNodeData(projectId, dsId, { stale: true });
+        }
+      } else {
+        get().updateNodeData(projectId, targetId, { stale: true });
+      }
     }
   },
 }));

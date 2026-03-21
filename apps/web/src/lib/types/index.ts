@@ -38,6 +38,9 @@ export interface PipelineNodeData extends Record<string, unknown> {
   format?: string;
   /** Issue indicator — count of problems requiring attention */
   issueCount?: number;
+  /** True when an upstream source was removed/changed and this node's output may be outdated */
+  stale?: boolean;
+  hasCleanedVersion?: boolean;
 }
 
 export type PipelineNode = Node<PipelineNodeData>;

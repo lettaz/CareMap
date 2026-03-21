@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { SourcePreview, SourcePreviewColumn } from "@/lib/types";
 import { ColumnHeaderPopover } from "./column-header-popover";
 import { PaginationBar } from "@/components/shared/pagination-bar";
@@ -10,6 +10,12 @@ interface SourceDataTableProps {
   preview: SourcePreview;
   showIssuesOnly: boolean;
 }
+
+const ROW_HEIGHT_PX = 28;
+const HEADER_HEIGHT_PX = 36;
+const PAGINATION_HEIGHT_PX = 36;
+const MIN_PAGE_SIZE = 10;
+const FALLBACK_PAGE_SIZE = 20;
 
 const TYPE_PILLS: Record<string, { label: string; className: string }> = {
   string: { label: "abc", className: "bg-blue-50 text-blue-600" },
@@ -29,11 +35,38 @@ function hasIssue(col: SourcePreviewColumn, totalRows: number): boolean {
   return col.nullCount / totalRows > 0.1;
 }
 
+function computePageSize(containerHeight: number): number {
+  const available = containerHeight - HEADER_HEIGHT_PX - PAGINATION_HEIGHT_PX;
+  const rows = Math.floor(available / ROW_HEIGHT_PX);
+  return Math.max(MIN_PAGE_SIZE, rows);
+}
+
 export function SourceDataTable({ preview, showIssuesOnly }: SourceDataTableProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dynamicPageSize, setDynamicPageSize] = useState(FALLBACK_PAGE_SIZE);
   const [activeColumn, setActiveColumn] = useState<string | null>(null);
   const [fetchedRows, setFetchedRows] = useState<Record<string, string | number | null>[] | null>(null);
   const [currentSourceFileId, setCurrentSourceFileId] = useState(preview.sourceFileId);
-  const pg = usePagination(preview.totalRows, { defaultPageSize: 20 });
+  const pg = usePagination(preview.totalRows, { defaultPageSize: dynamicPageSize });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      const height = el.clientHeight;
+      if (height > 0) {
+        const newSize = computePageSize(height);
+        setDynamicPageSize(newSize);
+        pg.setPageSize(newSize);
+      }
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   if (currentSourceFileId !== preview.sourceFileId) {
     setCurrentSourceFileId(preview.sourceFileId);
@@ -62,7 +95,7 @@ export function SourceDataTable({ preview, showIssuesOnly }: SourceDataTableProp
   const rowOffset = (pg.page - 1) * pg.pageSize;
 
   return (
-    <div className="min-w-0 flex flex-col">
+    <div ref={containerRef} className="min-w-0 flex flex-col h-full">
       <div className="flex-1 overflow-auto">
         <table className="w-full border-collapse text-xs">
           <thead className="sticky top-0 z-10">

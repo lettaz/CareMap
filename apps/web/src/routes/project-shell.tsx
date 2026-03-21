@@ -19,6 +19,7 @@ export default function ProjectShell() {
 
   const projectExists = projects.some((p) => p.id === projectId);
   const isCanvasRoute = location.pathname.endsWith("/canvas");
+  const isSettingsRoute = location.pathname.endsWith("/settings");
 
   useEffect(() => {
     if (!hydrated && !loading) fetchProjects();
@@ -44,7 +45,7 @@ export default function ProjectShell() {
         <div className="h-full flex-1 overflow-hidden">
           <Outlet />
         </div>
-        <RightPanel isCanvasRoute={isCanvasRoute} />
+        {!isSettingsRoute && <RightPanel isCanvasRoute={isCanvasRoute} />}
       </div>
     </TourProvider>
   );
