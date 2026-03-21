@@ -1,5 +1,8 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { MessageCircle, X, AlertTriangle, Filter, Loader2, Webhook } from "lucide-react";
+import {
+  MessageCircle, X, AlertTriangle, Filter, Loader2,
+  Database, Server, Globe, Clock, Lock,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
@@ -55,7 +58,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const [sampleRows, setSampleRows] = useState<Record<string, unknown>[] | null>(null);
   const [showIssuesOnly, setShowIssuesOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sourceTab, setSourceTab] = useState<"data" | "webhook">("data");
+  const [sourceTab, setSourceTab] = useState<"data" | "ingestion">("data");
   const prevNodeId = useRef(nodeId);
 
   useEffect(() => {
@@ -389,15 +392,14 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
             Data
           </button>
           <button
-            onClick={() => setSourceTab("webhook")}
+            onClick={() => setSourceTab("ingestion")}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
-              sourceTab === "webhook"
+              sourceTab === "ingestion"
                 ? "border-cm-accent text-cm-accent"
                 : "border-transparent text-cm-text-tertiary hover:text-cm-text-secondary"
             }`}
           >
-            <Webhook className="h-3 w-3" />
-            Webhook
+            Ingestion
           </button>
         </div>
       )}
@@ -410,9 +412,10 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         />
       )}
 
-      {sourceTab === "webhook" && phase !== "analyzing" && (
+      {sourceTab === "ingestion" && phase !== "analyzing" && (
         <div className="flex-1 overflow-y-auto">
           <WebhookConfigPanel projectId={projectId} nodeId={nodeId} />
+          <UpcomingConnectors />
         </div>
       )}
 
@@ -500,4 +503,75 @@ function buildAutoSummary(
   }
 
   return summary;
+}
+
+const UPCOMING_CONNECTORS = [
+  {
+    icon: Database,
+    name: "PostgreSQL",
+    description: "Connect to a Postgres database and sync tables or views on a schedule.",
+    color: "text-blue-600 bg-blue-50",
+  },
+  {
+    icon: Database,
+    name: "MySQL",
+    description: "Pull data from MySQL databases with configurable sync intervals.",
+    color: "text-orange-600 bg-orange-50",
+  },
+  {
+    icon: Server,
+    name: "SFTP / FTP",
+    description: "Automatically ingest files from remote servers on a schedule.",
+    color: "text-emerald-600 bg-emerald-50",
+  },
+  {
+    icon: Globe,
+    name: "REST API",
+    description: "Poll any REST endpoint and ingest JSON responses as tabular data.",
+    color: "text-violet-600 bg-violet-50",
+  },
+  {
+    icon: Clock,
+    name: "Scheduled Import",
+    description: "Configure cron-based imports from cloud storage (S3, GCS, Azure Blob).",
+    color: "text-amber-600 bg-amber-50",
+  },
+] as const;
+
+function UpcomingConnectors() {
+  return (
+    <div className="border-t border-cm-border-primary px-4 py-4">
+      <div className="flex items-center gap-2 mb-3">
+        <h4 className="text-xs font-semibold text-cm-text-primary">More Connectors</h4>
+        <span className="rounded-full bg-cm-accent-subtle px-2 py-0.5 text-[9px] font-semibold text-cm-accent uppercase tracking-wide">
+          Coming Soon
+        </span>
+      </div>
+      <p className="text-[11px] text-cm-text-tertiary mb-3 leading-relaxed">
+        Each source node can have its own ingestion method. Connect directly to databases,
+        file servers, or APIs — all data flows through the same pipeline.
+      </p>
+      <div className="space-y-2">
+        {UPCOMING_CONNECTORS.map((c) => (
+          <div
+            key={c.name}
+            className="flex items-start gap-3 rounded-lg border border-cm-border-subtle p-3 opacity-75 cursor-default"
+          >
+            <div className={`flex h-8 w-8 items-center justify-center rounded-lg shrink-0 ${c.color}`}>
+              <c.icon className="h-4 w-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-medium text-cm-text-primary">{c.name}</p>
+                <Lock className="h-2.5 w-2.5 text-cm-text-tertiary" />
+              </div>
+              <p className="text-[10px] text-cm-text-tertiary leading-relaxed mt-0.5">
+                {c.description}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
