@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { ReactFlowProvider } from "@xyflow/react";
 import { FlowCanvas } from "@/components/canvas/flow-canvas";
 import { NodePalette } from "@/components/canvas/node-palette";
 import { useActiveProject } from "@/hooks/use-active-project";
@@ -19,11 +20,13 @@ export default function CanvasPage() {
   if (!projectId) return null;
 
   return (
-    <div data-tour="canvas-area" className="relative flex h-full">
-      <div className="relative flex-1">
-        <FlowCanvas />
-        <NodePalette />
+    <ReactFlowProvider>
+      <div data-tour="canvas-area" className="relative flex h-full">
+        <div className="relative flex-1">
+          <FlowCanvas />
+          <NodePalette />
+        </div>
       </div>
-    </div>
+    </ReactFlowProvider>
   );
 }

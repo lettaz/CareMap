@@ -192,16 +192,34 @@ async function fetchWidgets(projectId: string) {
   return data ?? [];
 }
 
+async function getActiveSourceFileIds(projectId: string): Promise<Set<string>> {
+  const { data: pipelineNodes } = await supabase
+    .from("pipeline_nodes")
+    .select("config")
+    .eq("project_id", projectId)
+    .eq("node_type", "source");
+
+  return new Set(
+    (pipelineNodes ?? [])
+      .map((n) => (n.config as Record<string, unknown>)?.sourceFileId as string | undefined)
+      .filter(Boolean) as string[],
+  );
+}
+
 async function fetchSourceSummaries(projectId: string) {
+  const activeSourceFileIds = await getActiveSourceFileIds(projectId);
+
   const { data: files, error } = await supabase
     .from("source_files")
-    .select("id, filename, row_count, status")
+    .select("id, filename, file_type, row_count, column_count, status, raw_profile, uploaded_at")
     .eq("project_id", projectId);
 
   if (error) throw new Error(`Failed to fetch sources: ${error.message}`);
 
+  const activeFiles = (files ?? []).filter((f) => activeSourceFileIds.has(f.id));
+
   const summaries = [];
-  for (const file of files ?? []) {
+  for (const file of activeFiles) {
     const { count: totalMappings } = await supabase
       .from("field_mappings")
       .select("*", { count: "exact", head: true })
@@ -213,13 +231,20 @@ async function fetchSourceSummaries(projectId: string) {
       .eq("source_file_id", file.id)
       .eq("status", "accepted");
 
+    const rawProfile = file.raw_profile as { summary?: { domain?: string } } | null;
+
     summaries.push({
       id: file.id,
       filename: file.filename,
+      fileType: file.file_type ?? "csv",
       rowCount: file.row_count ?? 0,
+      columnCount: file.column_count ?? 0,
       status: (file as Record<string, unknown>).status as string ?? "raw",
+      domain: rawProfile?.summary?.domain ?? "",
       mappedFields: acceptedMappings ?? 0,
       unmappedFields: (totalMappings ?? 0) - (acceptedMappings ?? 0),
+      lastSyncAt: file.uploaded_at ?? new Date().toISOString(),
+      uploadedAt: file.uploaded_at ?? new Date().toISOString(),
     });
   }
 
@@ -227,12 +252,15 @@ async function fetchSourceSummaries(projectId: string) {
 }
 
 async function fetchCompleteness(projectId: string) {
-  const { data: files } = await supabase
+  const activeIds = await getActiveSourceFileIds(projectId);
+
+  const { data: allFiles } = await supabase
     .from("source_files")
     .select("id, filename, row_count, raw_profile")
     .eq("project_id", projectId);
 
-  if (!files?.length) return null;
+  const files = (allFiles ?? []).filter((f) => activeIds.has(f.id));
+  if (!files.length) return null;
 
   type RawStat = { columnName?: string; nullRate?: number };
   type RawProfile = { columns?: RawStat[] };

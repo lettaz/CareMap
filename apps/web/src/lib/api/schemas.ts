@@ -62,3 +62,9 @@ export function activateSchema(
     method: "POST",
   });
 }
+
+export function clearSchemaAndMappings(projectId: string): Promise<{ cleared: boolean }> {
+  return apiFetch<{ cleared: boolean }>(`/api/projects/${projectId}/schema`, {
+    method: "DELETE",
+  });
+}

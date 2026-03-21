@@ -147,4 +147,27 @@ export const schemaRoutes: FastifyPluginAsync = async (app) => {
       return data;
     },
   );
+
+  app.delete<{ Params: { projectId: string } }>(
+    "/:projectId/schema",
+    async (request) => {
+      const { projectId } = request.params;
+
+      const [schemaResult, mappingResult] = await Promise.all([
+        supabase
+          .from("target_schemas")
+          .delete()
+          .eq("project_id", projectId),
+        supabase
+          .from("field_mappings")
+          .delete()
+          .eq("project_id", projectId),
+      ]);
+
+      if (schemaResult.error) throw new Error(`Failed to delete schemas: ${schemaResult.error.message}`);
+      if (mappingResult.error) throw new Error(`Failed to delete mappings: ${mappingResult.error.message}`);
+
+      return { cleared: true };
+    },
+  );
 };

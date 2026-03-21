@@ -5,6 +5,7 @@ import { supabase } from "../config/supabase.js";
 import { listHarmonizedTables } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
 import { env } from "../config/env.js";
+import { createSanitizedStream } from "../lib/stream-sanitizer.js";
 
 const triggerSchema = z.object({
   nodeId: z.string(),
@@ -206,7 +207,8 @@ export const pipelineRoutes: FastifyPluginAsync = async (app) => {
     reply.raw.writeHead(status, headers);
 
     if (response.body) {
-      const reader = response.body.getReader();
+      const sanitized = createSanitizedStream(response.body);
+      const reader = sanitized.getReader();
       try {
         while (true) {
           const { done, value } = await reader.read();

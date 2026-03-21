@@ -48,15 +48,15 @@ function dtoToSource(dto: DashboardSourceDTO): DashboardSourceSummary {
   return {
     id: dto.id,
     filename: dto.filename,
-    fileType: "csv",
+    fileType: (dto.fileType ?? "csv") as DashboardSourceSummary["fileType"],
     status: dto.status as DashboardSourceSummary["status"],
     rowCount: dto.rowCount,
-    columnCount: 0,
+    columnCount: dto.columnCount ?? 0,
     mappedFields: dto.mappedFields,
     unmappedFields: dto.unmappedFields,
-    lastSyncAt: new Date().toISOString(),
-    uploadedAt: new Date().toISOString(),
-    domain: "",
+    lastSyncAt: dto.lastSyncAt ?? new Date().toISOString(),
+    uploadedAt: dto.uploadedAt ?? new Date().toISOString(),
+    domain: dto.domain ?? "",
   };
 }
 

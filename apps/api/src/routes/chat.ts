@@ -1,10 +1,11 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { UIMessage } from "ai";
-import { pipeAgentUIStreamToResponse } from "ai";
+import { createAgentUIStreamResponse } from "ai";
 import { z } from "zod";
 import { buildSystemPrompt, createAgent } from "../services/agent.js";
 import { ValidationError } from "../lib/errors.js";
 import { env } from "../config/env.js";
+import { createSanitizedStream } from "../lib/stream-sanitizer.js";
 
 const chatRequestSchema = z
   .object({
@@ -24,16 +25,39 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     const systemPrompt = await buildSystemPrompt(projectId);
     const agent = createAgent(systemPrompt);
 
-    reply.hijack();
-
-    await pipeAgentUIStreamToResponse({
-      response: reply.raw,
+    const response = await createAgentUIStreamResponse({
       agent,
       uiMessages: messages as unknown as UIMessage[],
-      headers: {
-        "Access-Control-Allow-Origin": env.CORS_ORIGIN,
-        "Access-Control-Allow-Credentials": "true",
-      },
     });
+
+    reply.hijack();
+
+    const headers: Record<string, string> = {
+      "Access-Control-Allow-Origin": env.CORS_ORIGIN,
+      "Access-Control-Allow-Credentials": "true",
+    };
+    if (response.headers) {
+      response.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+    }
+
+    reply.raw.writeHead(response.status ?? 200, headers);
+
+    if (response.body) {
+      const sanitized = createSanitizedStream(response.body);
+      const reader = sanitized.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          reply.raw.write(value);
+        }
+      } catch {
+        // Client disconnected
+      }
+    }
+
+    reply.raw.end();
   });
 };

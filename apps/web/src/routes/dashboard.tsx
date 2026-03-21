@@ -103,7 +103,7 @@ function DashboardTabs({ kpis, sources, completeness, alerts, lineage, correctio
               {/* KPI Row */}
               <div data-tour="dashboard-kpis" className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-5">
                 <KpiCard label="Total Sources" value={kpis.totalSources} icon={Database} iconColor="text-cm-node-source" />
-                <KpiCard label="Rows Harmonized" value={kpis.totalRowsHarmonized.toLocaleString()} icon={Layers} iconColor="text-cm-node-sink" />
+                <KpiCard label="Total Rows" value={kpis.totalRowsHarmonized.toLocaleString()} icon={Layers} iconColor="text-cm-node-source" />
                 <KpiCard label="Fields Mapped" value={`${kpis.fieldsMapped}/${kpis.fieldsTotal}`} icon={GitBranch} iconColor="text-cm-node-transform" trend="up" trendValue="+3 this session" />
                 <KpiCard label="Data Completeness" value={`${kpis.dataCompleteness}%`} icon={BarChart3} iconColor="text-cm-success" trend="up" trendValue="+2.1%" />
                 <KpiCard
@@ -182,7 +182,7 @@ export default function DashboardPage() {
 
   if (!projectId) return null;
 
-  const isInitialLoad = loading && (!dashboard || dashboard.sources.length === 0);
+  const isInitialLoad = loading && !dashboard;
 
   if (isInitialLoad) {
     return (
@@ -225,7 +225,7 @@ export default function DashboardPage() {
   const { pinnedWidgets, sources, completeness, alerts, lineage, corrections } =
     dashboard;
   const kpis = computeKpis(dashboard);
-  const isEmpty = sources.length === 0;
+  const isEmpty = sources.length === 0 && alerts.length === 0 && pinnedWidgets.length === 0;
 
   if (isEmpty && !loading) {
     return (
@@ -235,11 +235,11 @@ export default function DashboardPage() {
             <Upload className="h-7 w-7 text-cm-accent" />
           </div>
           <h1 className="mt-6 text-xl font-semibold text-cm-text-primary">
-            No data harmonized yet
+            No sources yet
           </h1>
           <p className="mt-2 text-sm leading-relaxed text-cm-text-secondary">
-            Upload source files and run harmonization from the canvas to see
-            quality metrics, alerts, and insights here.
+            Upload source files from the canvas to see quality metrics,
+            field mappings, and insights here.
           </p>
           <Link
             to={`/projects/${projectId}/canvas`}

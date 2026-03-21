@@ -111,8 +111,12 @@ export function FlowCanvas() {
         category: "source" as const,
       }));
 
+      const hasActiveSchema = targetNode.data.schemaStatus === "active";
+
       setPendingMessage({
-        text: "Propose a target schema and field mappings for the connected sources",
+        text: hasActiveSchema
+          ? "Propose field mappings for the connected sources using the active target schema"
+          : "Propose a target schema for the connected sources",
         mentions,
         transformNodeId: connection.target,
       });

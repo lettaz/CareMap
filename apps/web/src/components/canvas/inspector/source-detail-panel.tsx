@@ -49,6 +49,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   );
   const selectNode = usePipelineStore((s) => s.selectNode);
   const updateNodeData = usePipelineStore((s) => s.updateNodeData);
+  const notifySourceReady = usePipelineStore((s) => s.notifySourceReady);
 
   const nodeStatus = node?.data.status as string | undefined;
   const hasExistingData = !!node?.data.sourceFileId && nodeStatus === "ready";
@@ -232,6 +233,8 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                     text: "Review the profile for this source and suggest a cleaning plan",
                     mentions: [{ label: suggestedLabel, id: nodeId, sourceFileId: sfId, category: "source" }],
                   });
+                } else {
+                  notifySourceReady(projectId, nodeId);
                 }
                 break;
               }
@@ -364,7 +367,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   }, [projectId, nodeId, sourceFileId, node, setPendingMessage, selectNode, isPanelOpen, togglePanel]);
 
   return (
-    <div className="flex w-full flex-col overflow-hidden">
+    <div className="flex h-full w-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-cm-border-primary px-4 py-3 shrink-0">
         <div className="min-w-0 flex-1">
           <EditableLabel
@@ -448,7 +451,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
       )}
 
       {sourceTab === "data" && phase === "preview" && preview && (
-        <>
+        <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
           <SourceSummaryBar preview={preview} onAiClick={handleOpenChat} onRequestCleanup={handleRequestCleanup} />
 
           {hasCleanedVersion && (
@@ -478,7 +481,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
           )}
 
           {dataView === "original" && (
-            <>
+            <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
               {preview.issueCount > 0 && (
                 <div className="flex items-center justify-between border-b border-cm-border-primary px-4 py-2 shrink-0">
                   <button
@@ -498,10 +501,10 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                 </div>
               )}
 
-              <div className="flex-1 overflow-auto">
+              <div className="flex-1 min-h-0 overflow-hidden">
                 <SourceDataTable preview={preview} showIssuesOnly={showIssuesOnly} />
               </div>
-            </>
+            </div>
           )}
 
           {dataView === "cleaned" && (
@@ -511,7 +514,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
               columns={preview.columns}
             />
           )}
-        </>
+        </div>
       )}
 
       {sourceTab === "data" && phase === "preview" && !preview && (

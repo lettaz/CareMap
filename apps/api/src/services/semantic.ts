@@ -136,6 +136,18 @@ export async function updateSemanticLayer(projectId: string): Promise<void> {
 }
 
 export async function getSemanticContext(projectId: string): Promise<SemanticContext> {
+  const { data: sourceNodes } = await supabase
+    .from("pipeline_nodes")
+    .select("config")
+    .eq("project_id", projectId)
+    .eq("node_type", "source");
+
+  const activeSourceFileIds = new Set(
+    (sourceNodes ?? [])
+      .map((n) => (n.config as Record<string, unknown>)?.sourceFileId as string | undefined)
+      .filter(Boolean) as string[],
+  );
+
   const [
     projectResult,
     sourcesResult,
@@ -162,7 +174,10 @@ export async function getSemanticContext(projectId: string): Promise<SemanticCon
   ]);
 
   const project = projectResult.data;
-  const sources = (sourcesResult.data ?? []) as SourceFileRow[];
+  const allSources = (sourcesResult.data ?? []) as SourceFileRow[];
+  const sources = activeSourceFileIds.size > 0
+    ? allSources.filter((s) => activeSourceFileIds.has(s.id))
+    : allSources;
   const profiles = (profilesResult.data ?? []) as SourceProfileRow[];
   const mappings = (mappingsResult.data ?? []) as FieldMappingRow[];
   const entities = (entitiesResult.data ?? []) as SemanticEntityRow[];

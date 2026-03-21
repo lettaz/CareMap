@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { X } from "lucide-react";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
+import { useChatSessionStore } from "@/lib/stores/chat-session-store";
 import { useActiveProject } from "@/hooks/use-active-project";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { AgentPanel } from "./agent-panel";
@@ -15,6 +16,7 @@ import { cn } from "@/lib/utils";
 
 interface RightPanelProps {
   isCanvasRoute: boolean;
+  isDashboardRoute?: boolean;
 }
 
 const DEFAULT_WIDTHS: Record<string, number> = {
@@ -29,7 +31,7 @@ const DEFAULT_WIDTHS: Record<string, number> = {
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 900;
 
-export function RightPanel({ isCanvasRoute }: RightPanelProps) {
+export function RightPanel({ isCanvasRoute, isDashboardRoute }: RightPanelProps) {
   const { projectId } = useActiveProject();
   const isPanelOpen = useAgentStore((s) => s.isPanelOpen);
   const togglePanel = useAgentStore((s) => s.togglePanel);
@@ -43,14 +45,22 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
     return s.pipelines[projectId]?.nodes.find((n) => n.id === selectedNodeId) ?? null;
   });
 
+  const hasActiveChat = useChatSessionStore((s) => {
+    if (!s.activeSessionId) return false;
+    const session = s.sessions.find((sess) => sess.id === s.activeSessionId);
+    return (session?.messages.length ?? 0) > 0;
+  });
+
   const showInspector = isCanvasRoute && selectedNode !== null;
   const nodeCategory = selectedNode?.data.category ?? null;
 
   const baseWidth = !isPanelOpen
     ? 0
-    : showInspector
-      ? DEFAULT_WIDTHS[nodeCategory ?? ""] ?? 420
-      : DEFAULT_WIDTHS.agent;
+    : isDashboardRoute
+      ? MIN_WIDTH
+      : showInspector
+        ? DEFAULT_WIDTHS[nodeCategory ?? ""] ?? 420
+        : DEFAULT_WIDTHS.agent;
 
   const [panelWidth, setPanelWidth] = useState(baseWidth);
   const isDragging = useRef(false);
@@ -95,8 +105,9 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
   }, []);
 
   if (!isPanelOpen) return null;
+  if (isDashboardRoute && !hasActiveChat) return null;
 
-  const panelContent = showInspector ? (
+  const inspectorContent = showInspector ? (
     nodeCategory === "source" ? (
       <SourceDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
     ) : nodeCategory === "transform" ? (
@@ -108,9 +119,7 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
     ) : nodeCategory === "sink" ? (
       <ExportDetailPanel key={selectedNode!.id} nodeId={selectedNode!.id} />
     ) : null
-  ) : (
-    <AgentPanel />
-  );
+  ) : null;
 
   if (isMobile) {
     return (
@@ -131,7 +140,10 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
             </Button>
           </div>
           <div className="flex-1 overflow-hidden">
-            {panelContent}
+            {showInspector ? inspectorContent : null}
+            <div className={cn("h-full", showInspector && "hidden")}>
+              <AgentPanel />
+            </div>
           </div>
         </div>
       </>
@@ -154,7 +166,10 @@ export function RightPanel({ isCanvasRoute }: RightPanelProps) {
       />
 
       <div className="flex h-full w-full flex-col overflow-hidden">
-        {panelContent}
+        {showInspector ? inspectorContent : null}
+        <div className={cn("h-full", showInspector && "hidden")}>
+          <AgentPanel />
+        </div>
       </div>
     </div>
   );

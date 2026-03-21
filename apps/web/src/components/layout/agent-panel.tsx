@@ -278,6 +278,7 @@ export function AgentPanel() {
   const setPendingMessage = useAgentStore((s) => s.setPendingMessage);
   const updateNodeData = usePipelineStore((s) => s.updateNodeData);
   const activeTransformRef = useRef<string | null>(null);
+  const wasStreamingRef = useRef(false);
 
   useEffect(() => {
     if (!pendingMessage || !projectId || status !== "ready") return;
@@ -309,7 +310,12 @@ export function AgentPanel() {
   }, [pendingMessage, projectId, status, setPendingMessage, openPanel, sendMessage, activeSessionId, createSession]);
 
   useEffect(() => {
-    if (status !== "ready" || !activeTransformRef.current || !projectId) return;
+    if (status !== "ready") {
+      wasStreamingRef.current = true;
+      return;
+    }
+    if (!wasStreamingRef.current || !activeTransformRef.current || !projectId) return;
+    wasStreamingRef.current = false;
     updateNodeData(projectId, activeTransformRef.current, { status: "ready" });
     activeTransformRef.current = null;
   }, [status, projectId, updateNodeData]);

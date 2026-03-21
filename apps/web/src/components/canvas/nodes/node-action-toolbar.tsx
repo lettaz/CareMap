@@ -186,7 +186,7 @@ function getRunLabel(category: NodeCategory): string {
 function getRunPrompt(category: NodeCategory): string {
   switch (category) {
     case "source": return "Profile and analyze this source data";
-    case "transform": return "Propose a target schema and generate field mappings";
+    case "transform": return "Propose a target schema for the connected sources";
     case "harmonize": return "Run harmonization on accepted mappings";
     case "quality": return "Run a quality check on the harmonized data";
     default: return "Process this node";

@@ -19,6 +19,7 @@ import {
   type PipelineEdgeDTO,
 } from "@/lib/api/pipeline";
 import { deleteSourceFile } from "@/lib/api/ingest";
+import { clearSchemaAndMappings } from "@/lib/api/schemas";
 import { useAgentStore } from "./agent-store";
 
 export interface PipelineData {
@@ -134,6 +135,7 @@ interface PipelineState {
   addNode: (projectId: string, node: PipelineNode) => void;
   addEdge: (projectId: string, edge: PipelineEdge) => void;
   updateNodeData: (projectId: string, nodeId: string, partial: Partial<PipelineNodeData>) => void;
+  notifySourceReady: (projectId: string, sourceNodeId: string) => void;
   removeNode: (projectId: string, nodeId: string) => void;
 }
 
@@ -273,11 +275,74 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
   },
 
   onEdgesChange: (projectId, changes) => {
+    const beforePipeline = getPipeline(get(), projectId);
+    const removedEdges = changes
+      .filter((c) => c.type === "remove")
+      .map((c) => beforePipeline.edges.find((e) => e.id === c.id))
+      .filter(Boolean) as PipelineEdge[];
+
     set((state) => {
       const p = getPipeline(state, projectId);
       return { pipelines: { ...state.pipelines, [projectId]: { ...p, edges: applyEdgeChanges(changes, p.edges) } } };
     });
     debouncedSave(projectId, () => getPipeline(get(), projectId));
+
+    if (removedEdges.length === 0) return;
+
+    const updated = getPipeline(get(), projectId);
+    const affectedTransformIds = new Set(
+      removedEdges
+        .map((e) => e.target)
+        .filter((targetId) => {
+          const node = updated.nodes.find((n) => n.id === targetId);
+          return node?.data.category === "transform";
+        }),
+    );
+
+    for (const transformId of affectedTransformIds) {
+      const remainingSources = updated.edges
+        .filter((e) => e.target === transformId)
+        .map((e) => updated.nodes.find((n) => n.id === e.source))
+        .filter((n) => n?.data.category === "source" && n.data.sourceFileId);
+
+      if (remainingSources.length === 0) {
+        get().updateNodeData(projectId, transformId, {
+          status: "idle",
+          schemaStatus: undefined,
+          mappedCount: undefined,
+          totalFields: undefined,
+          confidenceAvg: undefined,
+          sourceCount: undefined,
+          schemaTableCount: undefined,
+        });
+        clearSchemaAndMappings(projectId).catch((err) => {
+          console.error("Failed to clear schema/mappings:", err);
+        });
+      } else {
+        get().updateNodeData(projectId, transformId, { status: "running" });
+        const agentStore = useAgentStore.getState();
+        agentStore.openPanel();
+        agentStore.setPendingMessage({
+          text: "A source was disconnected. Re-propose the target schema for the remaining connected sources",
+          mentions: remainingSources.map((n) => ({
+            label: n!.data.label,
+            id: n!.id,
+            sourceFileId: n!.data.sourceFileId as string,
+            category: "source" as const,
+          })),
+          transformNodeId: transformId,
+        });
+      }
+
+      const downstreamIds = updated.edges
+        .filter((e) => e.source === transformId)
+        .map((e) => e.target);
+      for (const dsId of downstreamIds) {
+        if (updated.nodes.find((n) => n.id === dsId)) {
+          get().updateNodeData(projectId, dsId, { stale: true });
+        }
+      }
+    }
   },
 
   selectNode: (projectId, id) =>
@@ -320,6 +385,55 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
     debouncedSave(projectId, () => getPipeline(get(), projectId));
   },
 
+  notifySourceReady: (projectId, sourceNodeId) => {
+    const p = getPipeline(get(), projectId);
+    const sourceNode = p.nodes.find((n) => n.id === sourceNodeId);
+    if (!sourceNode || sourceNode.data.category !== "source" || !sourceNode.data.sourceFileId) return;
+
+    const connectedTransformIds = p.edges
+      .filter((e) => e.source === sourceNodeId)
+      .map((e) => e.target)
+      .filter((targetId) => {
+        const target = p.nodes.find((n) => n.id === targetId);
+        return target?.data.category === "transform";
+      });
+
+    for (const transformId of connectedTransformIds) {
+      const transformNode = p.nodes.find((n) => n.id === transformId);
+      if (!transformNode || transformNode.data.status === "running") continue;
+
+      const allSources = p.edges
+        .filter((e) => e.target === transformId)
+        .map((e) => p.nodes.find((n) => n.id === e.source))
+        .filter((n) => n?.data.category === "source" && n.data.sourceFileId);
+
+      if (allSources.length === 0) continue;
+
+      const hasActiveSchema = transformNode.data.schemaStatus === "active";
+
+      get().updateNodeData(projectId, transformId, { status: "running" });
+      const agentStore = useAgentStore.getState();
+      agentStore.openPanel();
+      agentStore.setPendingMessage({
+        text: hasActiveSchema
+          ? "Propose field mappings for the connected sources using the active target schema"
+          : "Propose a target schema for the connected sources",
+        mentions: allSources.map((n) => ({
+          label: n!.data.label,
+          id: n!.id,
+          sourceFileId: n!.data.sourceFileId as string,
+          category: "source" as const,
+        })),
+        transformNodeId: transformId,
+      });
+      toast.info("Transform triggered", {
+        description: hasActiveSchema
+          ? "Source data is ready — field mapping will start"
+          : "Source data is ready — schema proposal will start",
+      });
+    }
+  },
+
   removeNode: (projectId, nodeId) => {
     const p = getPipeline(get(), projectId);
     const node = p.nodes.find((n) => n.id === nodeId);
@@ -353,6 +467,12 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
       });
     }
 
+    if (node?.data.category === "transform") {
+      clearSchemaAndMappings(projectId).catch((err) => {
+        console.error("Failed to clear schema/mappings:", err);
+      });
+    }
+
     if (!isSource) return;
 
     const updatedPipeline = getPipeline(get(), projectId);
@@ -372,7 +492,7 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
           const agentStore = useAgentStore.getState();
           agentStore.openPanel();
           agentStore.setPendingMessage({
-            text: "A source was removed. Re-propose the target schema and field mappings for the remaining connected sources",
+            text: "A source was removed. Re-propose the target schema for the remaining connected sources",
             mentions: remainingSources.map((n) => ({
               label: n!.data.label,
               id: n!.id,
@@ -383,7 +503,18 @@ export const usePipelineStore = create<PipelineState>()((set, get) => ({
           });
           toast.info("Re-mapping triggered", { description: "Transform node will update with remaining sources" });
         } else {
-          get().updateNodeData(projectId, targetId, { status: "idle", schemaStatus: undefined });
+          get().updateNodeData(projectId, targetId, {
+            status: "idle",
+            schemaStatus: undefined,
+            mappedCount: undefined,
+            totalFields: undefined,
+            confidenceAvg: undefined,
+            sourceCount: undefined,
+            schemaTableCount: undefined,
+          });
+          clearSchemaAndMappings(projectId).catch((err) => {
+            console.error("Failed to clear schema/mappings:", err);
+          });
           toast.info("Transform node reset", { description: "No sources connected" });
         }
 

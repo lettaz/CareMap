@@ -478,7 +478,7 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
                       </span>
                     )}
                     <span className="ml-auto text-[10px] text-cm-text-tertiary shrink-0">
-                      {currentMappings.filter((m) => m.status === "accepted").length}/{currentSchemaTable.columns.length} covered
+                      {new Set(currentMappings.filter((m) => m.status === "accepted").map((m) => m.target_column)).size}/{currentSchemaTable.columns.length} covered
                     </span>
                   </div>
                 )}

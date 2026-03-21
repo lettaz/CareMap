@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useReactFlow } from "@xyflow/react";
 import { Plus, FileUp, Shuffle, Layers, Download, ShieldCheck } from "lucide-react";
 import {
   Sheet,
@@ -11,16 +12,9 @@ import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useActiveProject } from "@/hooks/use-active-project";
 import type { NodeCategory, PipelineNode } from "@/lib/types";
 
+const NODE_WIDTH = 220;
 const NODE_HEIGHT = 160;
-const NODE_GAP = 24;
-
-const CATEGORY_X: Record<NodeCategory, number> = {
-  source: 50,
-  transform: 350,
-  harmonize: 600,
-  quality: 850,
-  sink: 1100,
-};
+const SNAP_DISTANCE = 40;
 
 const NODE_OPTIONS = [
   { category: "source" as NodeCategory, label: "Source", icon: FileUp, color: "text-cm-node-source", bg: "bg-cm-node-source-subtle", desc: "Upload a CSV, XLSX or TXT file" },
@@ -30,11 +24,35 @@ const NODE_OPTIONS = [
   { category: "sink" as NodeCategory, label: "Output", icon: Download, color: "text-cm-node-sink", bg: "bg-cm-node-sink-subtle", desc: "Export in CSV, JSON, XLSX or Parquet" },
 ];
 
+function nudgeToAvoidOverlap(
+  x: number,
+  y: number,
+  existing: PipelineNode[],
+): { x: number; y: number } {
+  let finalX = x;
+  let finalY = y;
+  let attempts = 0;
+
+  while (attempts < 10) {
+    const collision = existing.some(
+      (n) =>
+        Math.abs(n.position.x - finalX) < NODE_WIDTH &&
+        Math.abs(n.position.y - finalY) < NODE_HEIGHT,
+    );
+    if (!collision) break;
+    finalY += NODE_HEIGHT + SNAP_DISTANCE;
+    attempts++;
+  }
+
+  return { x: finalX, y: finalY };
+}
+
 export function NodePalette() {
   const [open, setOpen] = useState(false);
   const { projectId } = useActiveProject();
   const addNode = usePipelineStore((s) => s.addNode);
   const selectNode = usePipelineStore((s) => s.selectNode);
+  const { screenToFlowPosition } = useReactFlow();
 
   const nodes = usePipelineStore(
     (s) => (projectId ? s.pipelines[projectId]?.nodes : undefined) ?? [],
@@ -43,14 +61,14 @@ export function NodePalette() {
   const handleAdd = (category: NodeCategory, label: string) => {
     if (!projectId) return;
     const id = `${category}-${Date.now()}`;
-    const x = CATEGORY_X[category] ?? 250;
-    const sameCol = nodes.filter(
-      (n) => Math.abs(n.position.x - x) < 100,
-    );
-    const maxY = sameCol.length
-      ? Math.max(...sameCol.map((n) => n.position.y))
-      : -NODE_GAP;
-    const y = maxY + NODE_HEIGHT + NODE_GAP;
+
+    const centerX = window.innerWidth / 2;
+    const centerY = window.innerHeight / 2;
+    const flowPos = screenToFlowPosition({ x: centerX, y: centerY });
+
+    const snappedX = Math.round(flowPos.x - NODE_WIDTH / 2);
+    const snappedY = Math.round(flowPos.y - NODE_HEIGHT / 2);
+    const { x, y } = nudgeToAvoidOverlap(snappedX, snappedY, nodes);
 
     const node: PipelineNode = {
       id,

@@ -25,10 +25,15 @@ export interface DashboardAlertDTO {
 export interface DashboardSourceDTO {
   id: string;
   filename: string;
+  fileType: string;
   rowCount: number;
+  columnCount: number;
   status: string;
+  domain: string;
   mappedFields: number;
   unmappedFields: number;
+  lastSyncAt: string;
+  uploadedAt: string;
 }
 
 export interface DashboardDTO {
