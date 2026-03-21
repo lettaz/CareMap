@@ -16,7 +16,7 @@ import {
   Loader2,
   Plus,
   MessageSquare,
-  MoreHorizontal,
+  History,
 } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
@@ -544,7 +544,7 @@ export function AgentPanel() {
           })}
         </div>
 
-        <div className="flex items-center gap-0.5 px-1.5 shrink-0">
+        <div className="flex items-center gap-0.5 px-1.5 shrink-0 border-l border-cm-border-subtle">
           <button
             type="button"
             onClick={handleNewChat}
@@ -555,36 +555,78 @@ export function AgentPanel() {
             <Plus className="h-3.5 w-3.5" />
           </button>
 
-          {sessions.length > 6 && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowSessionList((v) => !v)}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary transition-colors"
-                title="More chats"
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </button>
-              {showSessionList && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowSessionList(false)} />
-                  <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-cm-border-primary bg-cm-bg-surface py-1 shadow-lg max-h-64 overflow-y-auto">
-                    {sessions.slice(6).map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => handleSwitchSession(s.id)}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-cm-text-secondary hover:bg-cm-bg-hover transition-colors"
-                      >
-                        <MessageSquare className="h-3 w-3 shrink-0 text-cm-text-tertiary" />
-                        <span className="truncate">{s.title}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowSessionList((v) => !v)}
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                showSessionList
+                  ? "bg-cm-bg-hover text-cm-text-secondary"
+                  : "text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary",
               )}
-            </div>
-          )}
+              title="Chat history"
+            >
+              <History className="h-3.5 w-3.5" />
+            </button>
+            {showSessionList && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowSessionList(false)} />
+                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-cm-border-primary bg-cm-bg-surface py-1 shadow-lg max-h-80 overflow-y-auto">
+                  <p className="px-3 py-1.5 text-[10px] font-medium text-cm-text-tertiary uppercase tracking-wide">
+                    All Chats ({sessions.length})
+                  </p>
+                  {sessions.length === 0 && (
+                    <p className="px-3 py-3 text-[11px] text-cm-text-tertiary text-center">No chats yet</p>
+                  )}
+                  {sessions.map((s) => {
+                    const isActive = s.id === activeSessionId;
+                    return (
+                      <div
+                        key={s.id}
+                        className={cn(
+                          "flex items-center gap-2 px-3 py-2 transition-colors group",
+                          isActive ? "bg-cm-accent-subtle" : "hover:bg-cm-bg-hover",
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleSwitchSession(s.id)}
+                          className="flex flex-1 items-center gap-2 min-w-0 text-left"
+                        >
+                          <MessageSquare className={cn(
+                            "h-3 w-3 shrink-0",
+                            isActive ? "text-cm-accent" : "text-cm-text-tertiary",
+                          )} />
+                          <div className="flex-1 min-w-0">
+                            <p className={cn(
+                              "text-[11px] truncate",
+                              isActive ? "text-cm-accent font-medium" : "text-cm-text-secondary",
+                            )}>
+                              {s.title}
+                            </p>
+                            <p className="text-[9px] text-cm-text-tertiary">
+                              {s.messages.length} msg{s.messages.length !== 1 ? "s" : ""}
+                              {" · "}
+                              {formatSessionAge(s.updatedAt)}
+                            </p>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}
+                          className="shrink-0 opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-cm-text-tertiary hover:text-red-500 hover:bg-red-50 transition-all"
+                          title="Delete"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -994,4 +1036,15 @@ function AgentEmptyState({ onSuggestionClick }: { onSuggestionClick: (text: stri
       </div>
     </div>
   );
+}
+
+function formatSessionAge(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
