@@ -1,7 +1,6 @@
 import { supabase } from "../config/supabase.js";
-import { executeInSandbox, getSignedFileUrls, buildFileDownloadPreamble } from "./sandbox.js";
-import { cleanedPath } from "./storage.js";
-import type { SandboxOptions } from "./sandbox.js";
+import { createSandbox, getSignedFileUrls, buildFileDownloadPreamble } from "./sandbox.js";
+import { cleanedPath, uploadFile } from "./storage.js";
 
 export interface CleaningAction {
   column: string;
@@ -49,6 +48,13 @@ const ACTION_TEMPLATES: Record<CleaningAction["action"], (col: string, params: R
   convertUnit: (col, params) =>
     `df["${col}"] = df["${col}"] * ${params.factor ?? 1}`,
 };
+
+function sanitizeFilename(raw: string): string {
+  return raw
+    .replace(/\.(csv|parquet|xlsx|json|txt)$/i, "")
+    .replace(/[^a-zA-Z0-9_]/g, "_")
+    .toLowerCase();
+}
 
 export function buildCleaningScript(
   actions: CleaningAction[],
@@ -102,10 +108,15 @@ export async function executeCleaning(
 
   await supabase.from("source_files").update({ status: "cleaning" }).eq("id", sourceFileId);
 
-  const fileUrls = await getSignedFileUrls([sourceFile.storage_path]);
+  const originalFilename = sourceFile.filename as string;
+  const downloadName = `${sanitizeFilename(originalFilename)}.csv`;
+
+  const nameMap = new Map([[sourceFile.storage_path as string, downloadName]]);
+  const fileUrls = await getSignedFileUrls([sourceFile.storage_path], nameMap);
   const preamble = buildFileDownloadPreamble(fileUrls);
-  const outputFilePath = "/tmp/output/cleaned.csv";
-  const script = buildCleaningScript(actions, sourceFile.storage_path.split("/").pop()!, outputFilePath);
+
+  const outputFilePath = `/tmp/output/cleaned_${downloadName}`;
+  const script = buildCleaningScript(actions, downloadName, outputFilePath);
 
   const fullCode = `
 ${preamble}
@@ -113,55 +124,71 @@ import os
 os.makedirs("/tmp/output", exist_ok=True)
 
 ${script}
-
-with open("${outputFilePath}", "rb") as f:
-    _csv_bytes = f.read()
-print("__CSV_SIZE__:" + str(len(_csv_bytes)))
 `;
 
-  const opts: SandboxOptions = { timeoutMs: 60_000, onStdout: onProgress };
-  const result = await executeInSandbox(fullCode, fileUrls, opts);
+  const sandbox = await createSandbox();
+  let stdout = "";
+  let stderr = "";
 
-  if (result.exitCode !== 0) {
-    const errDetail = result.stderr || result.stdout || "(no output captured)";
-    await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFileId);
-    throw new Error(`Cleaning sandbox error (exit=${result.exitCode}, retries=${result.retryCount}): ${errDetail}`);
-  }
-
-  const outputLine = result.stdout
-    .split("\n")
-    .find((l) => l.startsWith("{"));
-
-  if (!outputLine) {
-    await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFileId);
-    throw new Error(
-      `Cleaning produced no output. ` +
-      `stdout: ${result.stdout.slice(0, 500) || "(empty)"}. ` +
-      `stderr: ${result.stderr.slice(0, 500) || "(empty)"}`
-    );
-  }
-
-  let cleanResult: { rowsBefore: number; rowsAfter: number; columnsCleaned: number; summary: Record<string, { before: string; after: string }> };
   try {
-    cleanResult = JSON.parse(outputLine);
-  } catch {
-    await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFileId);
-    throw new Error(`Cleaning output is malformed JSON: ${outputLine.slice(0, 300)}`);
+    const execution = await sandbox.runCode(fullCode, {
+      timeoutMs: 120_000,
+      onStdout: (msg: { line?: string } | string) => {
+        const line = typeof msg === "string" ? msg : (msg.line ?? "");
+        stdout += line + "\n";
+        onProgress?.(line);
+      },
+      onStderr: (msg: { line?: string } | string) => {
+        stderr += typeof msg === "string" ? msg : (msg.line ?? "");
+      },
+    });
+
+    if (execution.error) {
+      await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFileId);
+      throw new Error(`Cleaning sandbox error: ${execution.error.name}: ${execution.error.value}`);
+    }
+
+    const outputLine = stdout.split("\n").find((l) => l.startsWith("{"));
+    if (!outputLine) {
+      await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFileId);
+      throw new Error(
+        `Cleaning produced no output. ` +
+        `stdout: ${stdout.slice(0, 500) || "(empty)"}. ` +
+        `stderr: ${stderr.slice(0, 500) || "(empty)"}`
+      );
+    }
+
+    let cleanResult: { rowsBefore: number; rowsAfter: number; columnsCleaned: number; summary: Record<string, { before: string; after: string }> };
+    try {
+      cleanResult = JSON.parse(outputLine);
+    } catch {
+      await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFileId);
+      throw new Error(`Cleaning output is malformed JSON: ${outputLine.slice(0, 300)}`);
+    }
+
+    if (cleanResult.rowsAfter === 0 && cleanResult.rowsBefore > 0) {
+      console.warn(`[cleaner] Warning: cleaning reduced ${cleanResult.rowsBefore} rows to 0 for source ${sourceFileId}`);
+    }
+
+    const csvBytes = await sandbox.files.read(outputFilePath);
+    const csvBuffer = typeof csvBytes === "string"
+      ? Buffer.from(csvBytes, "utf-8")
+      : Buffer.from(csvBytes);
+
+    const storageDest = cleanedPath(projectId, sourceFileId);
+    await uploadFile(storageDest, csvBuffer, "text/csv");
+
+    await supabase
+      .from("source_files")
+      .update({
+        cleaned_path: storageDest,
+        status: "clean",
+        row_count: cleanResult.rowsAfter,
+      })
+      .eq("id", sourceFileId);
+
+    return { ...cleanResult, cleanedStoragePath: storageDest };
+  } finally {
+    await sandbox.kill().catch(() => {});
   }
-
-  if (cleanResult.rowsAfter === 0 && cleanResult.rowsBefore > 0) {
-    console.warn(`[cleaner] Warning: cleaning reduced ${cleanResult.rowsBefore} rows to 0 for source ${sourceFileId}`);
-  }
-
-  const storageDest = cleanedPath(projectId, sourceFileId);
-
-  await supabase
-    .from("source_files")
-    .update({ cleaned_path: storageDest, status: "clean" })
-    .eq("id", sourceFileId);
-
-  return {
-    ...cleanResult,
-    cleanedStoragePath: storageDest,
-  };
 }

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { MessageCircle, X, AlertTriangle, Filter, Loader2 } from "lucide-react";
+import { MessageCircle, X, AlertTriangle, Filter, Loader2, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
@@ -11,6 +11,7 @@ import { SourceUploadZone } from "./source-upload-zone";
 import { SourceAnalyzingState } from "./source-analyzing-state";
 import { SourceDataTable } from "./source-data-table";
 import { SourceSummaryBar } from "./source-summary-bar";
+import { WebhookConfigPanel } from "./webhook-config-panel";
 import { uploadWithSSE } from "@/lib/api/sse";
 import {
   fetchDetailedProfile,
@@ -54,6 +55,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const [sampleRows, setSampleRows] = useState<Record<string, unknown>[] | null>(null);
   const [showIssuesOnly, setShowIssuesOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceTab, setSourceTab] = useState<"data" | "webhook">("data");
   const prevNodeId = useRef(nodeId);
 
   useEffect(() => {
@@ -374,9 +376,29 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         </div>
       )}
 
-      {phase === "upload" && (
-        <div className="flex-1 overflow-y-auto p-4">
-          <SourceUploadZone onFileSelected={handleFileSelected} />
+      {phase !== "analyzing" && (
+        <div className="flex items-center gap-0.5 border-b border-cm-border-primary px-4 shrink-0">
+          <button
+            onClick={() => setSourceTab("data")}
+            className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+              sourceTab === "data"
+                ? "border-cm-accent text-cm-accent"
+                : "border-transparent text-cm-text-tertiary hover:text-cm-text-secondary"
+            }`}
+          >
+            Data
+          </button>
+          <button
+            onClick={() => setSourceTab("webhook")}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+              sourceTab === "webhook"
+                ? "border-cm-accent text-cm-accent"
+                : "border-transparent text-cm-text-tertiary hover:text-cm-text-secondary"
+            }`}
+          >
+            <Webhook className="h-3 w-3" />
+            Webhook
+          </button>
         </div>
       )}
 
@@ -388,7 +410,19 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         />
       )}
 
-      {phase === "preview" && preview && (
+      {sourceTab === "webhook" && phase !== "analyzing" && (
+        <div className="flex-1 overflow-y-auto">
+          <WebhookConfigPanel projectId={projectId} nodeId={nodeId} />
+        </div>
+      )}
+
+      {sourceTab === "data" && phase === "upload" && (
+        <div className="flex-1 overflow-y-auto p-4">
+          <SourceUploadZone onFileSelected={handleFileSelected} />
+        </div>
+      )}
+
+      {sourceTab === "data" && phase === "preview" && preview && (
         <>
           <SourceSummaryBar preview={preview} onAiClick={handleOpenChat} onRequestCleanup={handleRequestCleanup} />
 
@@ -417,7 +451,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         </>
       )}
 
-      {phase === "preview" && !preview && (
+      {sourceTab === "data" && phase === "preview" && !preview && (
         <div className="flex flex-1 items-center justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-cm-accent" />
         </div>

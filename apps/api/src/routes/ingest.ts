@@ -1,10 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { supabase } from "../config/supabase.js";
-import { parseCsv, parseExcel, profileColumns, saveProfiles } from "../services/profiler.js";
-import { uploadFile, rawPath, downloadFile, deleteFiles } from "../services/storage.js";
+import { parseCsv, parseExcel } from "../services/profiler.js";
+import { downloadFile, deleteFiles } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
-import { logStep } from "../lib/step-logger.js";
 import { env } from "../config/env.js";
+import { ingestBuffer } from "../services/ingest.js";
 
 function sseWrite(raw: { write: (chunk: string) => boolean }, type: string, data: unknown) {
   raw.write(`data: ${JSON.stringify({ type, data })}\n\n`);
@@ -32,6 +32,7 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
     const buffer = await file.toBuffer();
     const isExcel = /\.(xlsx|xls)$/i.test(file.filename);
     const isTsv = /\.(tsv)$/i.test(file.filename);
+    const fileType = isExcel ? "xlsx" : isTsv ? "tsv" : "csv";
 
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -41,142 +42,19 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       "Access-Control-Allow-Credentials": "true",
     });
 
-    // ── Step 1: Parse file ──
-    const fileType = isExcel ? "xlsx" : isTsv ? "tsv" : "csv";
-    const parseStep = await logStep({
-      projectId, nodeId, stepType: "parse_file",
-      inputSummary: { filename: file.filename, fileType, sizeBytes: buffer.length },
-    });
-    sseWrite(reply.raw, "step", { stepType: "parse_file", status: "running" });
-
-    const parsed = isExcel
-      ? parseExcel(buffer)
-      : parseCsv(buffer.toString("utf-8"), isTsv ? "\t" : undefined);
-
-    const parseOutput = {
-      rowCount: parsed.rowCount,
-      columnCount: parsed.columns.length,
-      columns: parsed.columns,
-      renames: parsed.renames,
-    };
-    await parseStep.finish(parseOutput);
-    sseWrite(reply.raw, "step", { stepType: "parse_file", status: "completed", output: parseOutput });
-
-    const { data: sourceFile, error: sfErr } = await supabase
-      .from("source_files")
-      .insert({
-        project_id: projectId,
-        filename: file.filename,
-        file_type: fileType,
-        row_count: parsed.rowCount,
-        column_count: parsed.columns.length,
-        storage_path: null,
-        cleaned_path: null,
-        raw_profile: null,
-        status: "raw",
-      })
-      .select()
-      .single();
-
-    if (sfErr || !sourceFile) throw new Error(`Failed to create source file record: ${sfErr?.message}`);
-
-    const storagePath = rawPath(projectId, sourceFile.id);
-    const uploadMime = isExcel ? "application/octet-stream" : isTsv ? "text/tab-separated-values" : "text/csv";
-    await uploadFile(storagePath, buffer, uploadMime);
-    await supabase.from("source_files").update({ storage_path: storagePath }).eq("id", sourceFile.id);
-
-    await supabase
-      .from("pipeline_nodes")
-      .update({ config: { sourceFileId: sourceFile.id }, status: "profiling" })
-      .eq("id", nodeId);
-
-    sseWrite(reply.raw, "parse_complete", {
-      rowCount: parsed.rowCount, columns: parsed.columns, sourceFileId: sourceFile.id,
-    });
-
     try {
-      // ── Step 2: Compute native statistics ──
-      const statsStep = await logStep({
-        projectId, nodeId, sourceFileId: sourceFile.id, stepType: "compute_stats",
-        inputSummary: { columnCount: parsed.columns.length, rowCount: parsed.rowCount },
-      });
-      sseWrite(reply.raw, "step", { stepType: "compute_stats", status: "running" });
-
-      // ── Step 3: LLM semantic interpretation (profileColumns does both compute + LLM) ──
-      const profile = await profileColumns(parsed.columns, parsed.rows, parsed.renames);
-
-      const statsOutput = profile.stats.map((s) => ({
-        columnName: s.columnName,
-        detectedType: s.detectedType,
-        nullRate: s.nullRate,
-        uniqueCount: s.uniqueCount,
-        uniqueRate: s.uniqueRate,
-      }));
-      await statsStep.finish({ columns: statsOutput });
-      sseWrite(reply.raw, "step", { stepType: "compute_stats", status: "completed", output: { columnCount: statsOutput.length } });
-
-      const llmStep = await logStep({
-        projectId, nodeId, sourceFileId: sourceFile.id, stepType: "llm_interpret",
-        inputSummary: { columnCount: parsed.columns.length, model: "gpt-5.2-codex" },
-      });
-      await llmStep.finish({
-        suggestedLabel: profile.summary.suggestedLabel,
-        domain: profile.summary.domain,
-        overallQuality: profile.summary.overallQuality,
-        columnsInterpreted: profile.columns.length,
-      });
-      sseWrite(reply.raw, "step", {
-        stepType: "llm_interpret", status: "completed",
-        output: { suggestedLabel: profile.summary.suggestedLabel, overallQuality: profile.summary.overallQuality },
-      });
-
-      for (const col of profile.columns) {
-        sseWrite(reply.raw, "profile_column", col);
-      }
-
-      // ── Step 4: Save profiles ──
-      const saveStep = await logStep({
-        projectId, nodeId, sourceFileId: sourceFile.id, stepType: "save_profiles",
-        inputSummary: { profileCount: profile.columns.length },
-      });
-      sseWrite(reply.raw, "step", { stepType: "save_profiles", status: "running" });
-
-      await saveProfiles(sourceFile.id, profile.columns);
-
-      await supabase
-        .from("source_files")
-        .update({
-          raw_profile: { columns: profile.stats, summary: profile.summary } as unknown as Record<string, unknown>,
-          status: "profiled",
-        })
-        .eq("id", sourceFile.id);
-
-      await supabase
-        .from("pipeline_nodes")
-        .update({ status: "ready", label: profile.summary.suggestedLabel })
-        .eq("id", nodeId);
-
-      await saveStep.finish({ savedCount: profile.columns.length });
-      sseWrite(reply.raw, "step", { stepType: "save_profiles", status: "completed", output: { savedCount: profile.columns.length } });
-
-      const criticalFlags = ["high_null_rate", "duplicate_rows", "data_type_mismatch"];
-      const avgConfidence = profile.columns.reduce((sum, c) => sum + c.confidence, 0) / (profile.columns.length || 1);
-      const criticalFlagCount = profile.columns.filter(
-        (c) => c.qualityFlags.some((f) => criticalFlags.includes(f)),
-      ).length;
-
-      sseWrite(reply.raw, "profile_complete", {
-        ...profile.summary,
-        avgConfidence,
-        criticalFlagCount,
+      await ingestBuffer({
+        projectId,
+        nodeId,
+        filename: file.filename,
+        buffer,
+        fileType,
+        onProgress: (type, data) => sseWrite(reply.raw, type, data),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Profiling failed";
+      const message = err instanceof Error ? err.message : "Ingestion failed";
       sseWrite(reply.raw, "step", { stepType: "error", status: "error", output: { message } });
       sseWrite(reply.raw, "error", { message });
-
-      await supabase.from("source_files").update({ status: "error" }).eq("id", sourceFile.id);
-      await supabase.from("pipeline_nodes").update({ status: "error" }).eq("id", nodeId);
     }
 
     reply.raw.end();

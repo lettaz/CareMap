@@ -160,12 +160,23 @@ export async function harmonize(
   const sourceFileMap = new Map<string, { cleanedPath: string; filename: string; downloadName: string }>();
   const storagePaths: string[] = [];
   const downloadNameMap = new Map<string, string>();
+  const seenNames = new Map<string, number>();
 
   for (const sf of sourceFiles) {
     const path = (sf.cleaned_path as string) || (sf.storage_path as string);
     if (!path) continue;
     const ext = path.endsWith(".parquet") ? ".parquet" : ".csv";
-    const downloadName = `${sf.id}${ext}`;
+
+    let baseName = (sf.filename as string)
+      .replace(/\.(csv|parquet|xlsx|json|txt)$/i, "")
+      .replace(/[^a-zA-Z0-9_]/g, "_")
+      .toLowerCase();
+
+    const count = seenNames.get(baseName) ?? 0;
+    seenNames.set(baseName, count + 1);
+    if (count > 0) baseName = `${baseName}_${count}`;
+
+    const downloadName = `${baseName}${ext}`;
     sourceFileMap.set(sf.id as string, {
       cleanedPath: path,
       filename: sf.filename as string,
@@ -175,7 +186,7 @@ export async function harmonize(
     downloadNameMap.set(path, downloadName);
   }
 
-  const fileUrls = await getSignedFileUrls(storagePaths);
+  const fileUrls = await getSignedFileUrls(storagePaths, downloadNameMap);
 
   const preambleLines = [
     "import os, urllib.request",

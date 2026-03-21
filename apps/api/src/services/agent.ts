@@ -27,7 +27,7 @@ When the user asks questions about their data, requests insights, or wants visua
 - Always use table and column names from the Harmonized Tables section below. Never guess or hallucinate names.
 - Use the Detected Joins section to know which tables can be joined and on which column.
 - For the "harmonized" stage, files are loaded as DuckDB tables (SQL) or into a \`dataframes\` dict (Python) matching the entity names.
-- For the "source" stage, pass specific sourceFileIds to query raw/cleaned files.
+- For the "source" stage, pass specific sourceFileIds to query raw/cleaned files. Tables are named after the original filenames (e.g., bed_sensor_data, care_assessments) — use these exact names in your SQL queries.
 - Prefer SQL for simple questions — it is faster and more transparent.
 
 ### Response Format

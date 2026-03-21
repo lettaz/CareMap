@@ -20,6 +20,7 @@ export interface Database {
       quality_alerts: { Row: QualityAlertRow; Insert: QualityAlertInsert };
       conversations: { Row: ConversationRow; Insert: ConversationInsert };
       conversation_messages: { Row: ConversationMessageRow; Insert: ConversationMessageInsert };
+      webhooks: { Row: WebhookRow; Insert: WebhookInsert };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -192,3 +193,22 @@ export interface ConversationMessageRow {
   created_at: string;
 }
 export type ConversationMessageInsert = Omit<ConversationMessageRow, "id" | "created_at">;
+
+// ── Webhooks ──
+
+export type WebhookPayloadType = "json" | "file" | "both";
+
+export interface WebhookRow {
+  id: string;
+  project_id: string;
+  node_id: string;
+  name: string;
+  api_key: string;
+  hmac_secret: string | null;
+  payload_type: WebhookPayloadType;
+  is_active: boolean;
+  created_at: string;
+  last_triggered_at: string | null;
+  trigger_count: number;
+}
+export type WebhookInsert = Omit<WebhookRow, "id" | "created_at" | "last_triggered_at" | "trigger_count">;

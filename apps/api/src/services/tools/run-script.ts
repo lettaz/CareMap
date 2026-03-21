@@ -20,25 +20,40 @@ export const runScriptTool = tool({
   execute: async ({ projectId, code, description, sourceFileIds }) => {
     try {
       const storagePaths: string[] = [];
+      const nameMap = new Map<string, string>();
+      const seenNames = new Map<string, number>();
+
+      function trackName(path: string, rawName: string) {
+        storagePaths.push(path);
+        let baseName = rawName
+          .replace(/\.(csv|parquet|xlsx|json|txt)$/i, "")
+          .replace(/[^a-zA-Z0-9_]/g, "_")
+          .toLowerCase();
+        const count = seenNames.get(baseName) ?? 0;
+        seenNames.set(baseName, count + 1);
+        if (count > 0) baseName = `${baseName}_${count}`;
+        const ext = path.endsWith(".parquet") ? ".parquet" : ".csv";
+        nameMap.set(path, `${baseName}${ext}`);
+      }
 
       if (sourceFileIds?.length) {
         const { data: files } = await supabase
           .from("source_files")
-          .select("cleaned_path, storage_path")
+          .select("filename, cleaned_path, storage_path")
           .in("id", sourceFileIds);
 
         for (const f of files ?? []) {
           const path = (f.cleaned_path as string) || (f.storage_path as string);
-          if (path) storagePaths.push(path);
+          if (path) trackName(path, f.filename as string);
         }
       } else {
         const { data: entities } = await supabase
           .from("semantic_entities")
-          .select("parquet_path")
+          .select("entity_name, parquet_path")
           .eq("project_id", projectId);
 
         for (const e of entities ?? []) {
-          if (e.parquet_path) storagePaths.push(e.parquet_path);
+          if (e.parquet_path) trackName(e.parquet_path, e.entity_name as string);
         }
       }
 
@@ -57,7 +72,7 @@ if '_result' in dir():
         print(json.dumps({"result": str(_result)}))
 `;
 
-      const result = await executeWithFileUpload(wrappedCode, storagePaths, { timeoutMs: 120_000 });
+      const result = await executeWithFileUpload(wrappedCode, storagePaths, { timeoutMs: 120_000 }, nameMap);
 
       if (result.exitCode !== 0) {
         const errDetail = result.stderr || result.stdout || "(no output)";

@@ -18,7 +18,16 @@ export const runQualityCheckTool = tool({
       return { message: "No harmonized data to check", alerts: [] };
     }
 
-    const storagePaths = entities.map((e) => e.parquet_path).filter(Boolean);
+    const storagePaths: string[] = [];
+    const nameMap = new Map<string, string>();
+    for (const e of entities) {
+      if (!e.parquet_path) continue;
+      storagePaths.push(e.parquet_path);
+      const entityName = (e.entity_name as string)
+        .replace(/[^a-zA-Z0-9_]/g, "_")
+        .toLowerCase();
+      nameMap.set(e.parquet_path, `${entityName}.csv`);
+    }
 
     const pythonCode = `
 import pandas as pd
@@ -57,7 +66,7 @@ for f in os.listdir("/tmp/data"):
 print(json.dumps({"alerts": alerts, "tablesChecked": checked}))
 `;
 
-    const result = await executeWithFileUpload(pythonCode, storagePaths, { timeoutMs: 30_000 });
+    const result = await executeWithFileUpload(pythonCode, storagePaths, { timeoutMs: 30_000 }, nameMap);
 
     const outputLine = result.stdout.split("\n").filter((l) => l.startsWith("{")).pop();
     const output = outputLine

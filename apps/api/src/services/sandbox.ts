@@ -50,21 +50,34 @@ export async function createSandbox(): Promise<Sandbox> {
   });
 }
 
+export interface FileUrlEntry {
+  path: string;
+  url: string;
+  downloadName?: string;
+}
+
 export async function getSignedFileUrls(
   storagePaths: string[],
-): Promise<Array<{ path: string; url: string }>> {
+  nameMap?: Map<string, string>,
+): Promise<FileUrlEntry[]> {
   const results = await Promise.all(
     storagePaths.map(async (path) => ({
       path,
       url: await getSignedUrl(path, 900),
+      downloadName: nameMap?.get(path),
     })),
   );
   return results;
 }
 
+function resolveDownloadName(f: FileUrlEntry): string {
+  if (f.downloadName) return f.downloadName;
+  return f.path.split("/").pop() ?? "file";
+}
+
 async function executeOnce(
   code: string,
-  fileUrls: Array<{ path: string; url: string }>,
+  fileUrls: FileUrlEntry[],
   opts: SandboxOptions,
 ): Promise<ExecutionResult> {
   const maxRows = opts.maxResultRows ?? DEFAULT_MAX_ROWS;
@@ -78,7 +91,7 @@ async function executeOnce(
         'os.makedirs("/tmp/data", exist_ok=True)',
         ...fileUrls.map(
           (f) =>
-            `urllib.request.urlretrieve("${f.url}", "/tmp/data/${f.path.split("/").pop()}")`,
+            `urllib.request.urlretrieve("${f.url}", "/tmp/data/${resolveDownloadName(f)}")`,
         ),
       ].join("\n");
       await sandbox.runCode(downloadCode, { timeoutMs: timeout });
@@ -128,7 +141,7 @@ if '_result' in dir() and isinstance(_result, list) and len(_result) > ${maxRows
 
 export async function executeInSandbox(
   code: string,
-  fileUrls: Array<{ path: string; url: string }> = [],
+  fileUrls: FileUrlEntry[] = [],
   opts: SandboxOptions = {},
 ): Promise<ExecutionResult> {
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -166,13 +179,14 @@ export async function executeWithFileUpload(
   code: string,
   storagePaths: string[],
   opts: SandboxOptions = {},
+  nameMap?: Map<string, string>,
 ): Promise<ExecutionResult> {
-  const fileUrls = await getSignedFileUrls(storagePaths);
+  const fileUrls = await getSignedFileUrls(storagePaths, nameMap);
   return executeInSandbox(code, fileUrls, opts);
 }
 
 export function buildFileDownloadPreamble(
-  fileUrls: Array<{ path: string; url: string }>,
+  fileUrls: FileUrlEntry[],
   targetDir = "/tmp/data",
 ): string {
   const lines = [
@@ -181,7 +195,7 @@ export function buildFileDownloadPreamble(
   ];
 
   for (const f of fileUrls) {
-    const filename = f.path.split("/").pop();
+    const filename = resolveDownloadName(f);
     lines.push(`urllib.request.urlretrieve("${f.url}", "${targetDir}/${filename}")`);
     lines.push(`print(f"Downloaded: ${filename}")`);
   }

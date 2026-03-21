@@ -15,6 +15,8 @@ import { pipelineRoutes } from "./routes/pipeline.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { stepLogRoutes } from "./routes/step-logs.js";
 import { schemaRoutes } from "./routes/schemas.js";
+import { webhookRoutes } from "./routes/webhooks.js";
+import { webhookIngestRoutes } from "./routes/webhook-ingest.js";
 
 const app = Fastify({
   logger: {
@@ -61,6 +63,8 @@ await app.register(pipelineRoutes, { prefix: "/api/projects" });
 await app.register(conversationRoutes, { prefix: "/api/projects" });
 await app.register(stepLogRoutes, { prefix: "/api/projects" });
 await app.register(schemaRoutes, { prefix: "/api/projects" });
+await app.register(webhookRoutes, { prefix: "/api/projects" });
+await app.register(webhookIngestRoutes, { prefix: "/api/wh" });
 
 app.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString() }));
 

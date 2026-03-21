@@ -812,11 +812,12 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
           }
 
           if (toolPart.state === "output-available" && toolPart.output != null) {
-            const expandByDefault = toolName === "generate_artifact";
+            const expandByDefault = toolName === "generate_artifact" || toolName === "suggest_cleaning";
+            const displayLabel = toolName === "suggest_cleaning" ? "Cleaning Plan Ready" : label;
             return (
               <CollapsibleToolResult
                 key={i}
-                label={label}
+                label={displayLabel}
                 toolName={toolName}
                 output={toolPart.output}
                 defaultOpen={expandByDefault}

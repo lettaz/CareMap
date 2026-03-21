@@ -1,5 +1,5 @@
 import { supabase } from "../config/supabase.js";
-import { executeWithFileUpload } from "./sandbox.js";
+import { getSignedFileUrls, executeInSandbox } from "./sandbox.js";
 
 export type QueryStage = "source" | "mapped" | "harmonized";
 
@@ -20,25 +20,41 @@ export interface QueryResult {
   executionTimeMs: number;
 }
 
-async function resolveStoragePaths(
+interface ResolvedFile {
+  storagePath: string;
+  downloadName: string;
+}
+
+function sanitizeTableName(filename: string): string {
+  return filename
+    .replace(/\.(csv|parquet|xlsx|json|txt)$/i, "")
+    .replace(/[^a-zA-Z0-9_]/g, "_")
+    .replace(/^(\d)/, "_$1")
+    .toLowerCase();
+}
+
+async function resolveFiles(
   projectId: string,
   stage: QueryStage,
   sourceFileIds?: string[],
-): Promise<string[]> {
+): Promise<ResolvedFile[]> {
   if (stage === "harmonized") {
     const { data: entities } = await supabase
       .from("semantic_entities")
-      .select("parquet_path")
+      .select("entity_name, parquet_path")
       .eq("project_id", projectId);
 
     return (entities ?? [])
-      .map((e) => e.parquet_path as string)
-      .filter(Boolean);
+      .filter((e) => e.parquet_path)
+      .map((e) => ({
+        storagePath: e.parquet_path as string,
+        downloadName: `${sanitizeTableName(e.entity_name as string)}.csv`,
+      }));
   }
 
   const query = supabase
     .from("source_files")
-    .select("id, storage_path, cleaned_path, status");
+    .select("id, filename, storage_path, cleaned_path, status");
 
   if (sourceFileIds?.length) {
     query.in("id", sourceFileIds);
@@ -47,9 +63,21 @@ async function resolveStoragePaths(
   }
 
   const { data: files } = await query;
+  const seen = new Map<string, number>();
+
   return (files ?? [])
-    .map((f) => (f.cleaned_path as string) || (f.storage_path as string))
-    .filter(Boolean);
+    .filter((f) => (f.cleaned_path as string) || (f.storage_path as string))
+    .map((f) => {
+      const storagePath = (f.cleaned_path as string) || (f.storage_path as string);
+      const ext = storagePath.endsWith(".parquet") ? ".parquet" : ".csv";
+      let baseName = sanitizeTableName(f.filename as string);
+
+      const count = seen.get(baseName) ?? 0;
+      seen.set(baseName, count + 1);
+      if (count > 0) baseName = `${baseName}_${count}`;
+
+      return { storagePath, downloadName: `${baseName}${ext}` };
+    });
 }
 
 function buildSqlQueryCode(sql: string): string {
@@ -107,9 +135,9 @@ if '_result' in dir():
 export async function executeQuery(request: QueryRequest): Promise<QueryResult> {
   const start = Date.now();
   const userCode = request.code;
-  const storagePaths = await resolveStoragePaths(request.projectId, request.stage, request.sourceFileIds);
+  const resolved = await resolveFiles(request.projectId, request.stage, request.sourceFileIds);
 
-  if (storagePaths.length === 0) {
+  if (resolved.length === 0) {
     return {
       rows: [],
       rowCount: 0,
@@ -119,11 +147,17 @@ export async function executeQuery(request: QueryRequest): Promise<QueryResult> 
     };
   }
 
+  const nameMap = new Map(resolved.map((r) => [r.storagePath, r.downloadName]));
+  const fileUrls = await getSignedFileUrls(
+    resolved.map((r) => r.storagePath),
+    nameMap,
+  );
+
   const pythonCode = request.type === "sql"
     ? buildSqlQueryCode(userCode)
     : buildPythonQueryCode(userCode);
 
-  const result = await executeWithFileUpload(pythonCode, storagePaths, {
+  const result = await executeInSandbox(pythonCode, fileUrls, {
     timeoutMs: 30_000,
     maxResultRows: 1000,
   });
