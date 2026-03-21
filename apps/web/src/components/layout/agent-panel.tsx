@@ -66,12 +66,47 @@ const TOOL_LABELS: Record<string, string> = {
   export_data: "Exporting data",
 };
 
-const SUGGESTIONS = [
+const DEFAULT_SUGGESTIONS = [
   "Profile a source file",
   "Map fields to canonical schema",
   "Show data quality issues",
   "Query harmonized data",
 ];
+
+const TOOL_FOLLOW_UPS: Record<string, string[]> = {
+  parse_file: ["Profile this source data", "Check for quality issues in this file"],
+  profile_columns: ["Suggest a cleaning plan", "Propose a target schema"],
+  suggest_cleaning: ["Execute this cleaning plan", "Modify the cleaning plan"],
+  execute_cleaning: ["Re-profile the cleaned data", "Propose a target schema"],
+  propose_target_schema: ["Show the proposed schema details", "Propose field mappings"],
+  propose_mappings: ["Review the mappings", "Accept all high-confidence mappings"],
+  confirm_mappings: ["Run harmonization", "Check mapping coverage"],
+  run_harmonization: ["Run a quality check", "Query the harmonized data"],
+  run_query: ["Export this data as CSV", "Generate a chart from these results"],
+  run_script: ["Query the results", "Export the output"],
+  generate_artifact: ["Pin this to the dashboard", "Run another query"],
+  run_quality_check: ["Show the quality alerts", "Fix the flagged issues"],
+  export_data: ["Export in another format", "Query more data"],
+  explain_lineage: ["Query harmonized data", "Run a quality check"],
+};
+
+function deriveContextualSuggestions(messages: UIMessage[]): string[] {
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  if (!lastAssistant?.parts) return DEFAULT_SUGGESTIONS;
+
+  const toolNames: string[] = [];
+  for (const part of lastAssistant.parts) {
+    if ((part.type === "dynamic-tool" || part.type.startsWith("tool-")) && "toolName" in part) {
+      const name = (part as { toolName?: string }).toolName;
+      if (name) toolNames.push(name);
+    }
+  }
+
+  if (toolNames.length === 0) return DEFAULT_SUGGESTIONS;
+
+  const lastTool = toolNames[toolNames.length - 1];
+  return TOOL_FOLLOW_UPS[lastTool] ?? DEFAULT_SUGGESTIONS;
+}
 
 const MODEL_OPTIONS = [
   { value: "auto", label: "Auto" },
@@ -227,6 +262,11 @@ export function AgentPanel() {
   });
 
   const { messages, sendMessage, status, error, stop, setMessages, addToolApprovalResponse } = chat;
+
+  const contextualSuggestions = useMemo(
+    () => deriveContextualSuggestions(messages),
+    [messages],
+  );
 
   useEffect(() => {
     if (status === "ready") {
@@ -479,7 +519,7 @@ export function AgentPanel() {
 
             {!isStreaming && (
               <Suggestions className="pt-1">
-                {SUGGESTIONS.map((s) => (
+                {contextualSuggestions.map((s) => (
                   <Suggestion key={s} suggestion={s} onClick={handleSuggestionClick} className="text-[11px]" />
                 ))}
               </Suggestions>
@@ -837,7 +877,7 @@ function AgentEmptyState({ onSuggestionClick }: { onSuggestionClick: (text: stri
         <p className="text-[10px] font-medium text-cm-text-tertiary uppercase tracking-wide px-1">
           Try asking
         </p>
-        {SUGGESTIONS.map((label) => (
+        {DEFAULT_SUGGESTIONS.map((label) => (
           <button
             key={label}
             onClick={() => onSuggestionClick(label)}

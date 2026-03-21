@@ -76,11 +76,20 @@ export function ExportDetailPanel({ nodeId }: ExportDetailPanelProps) {
         body,
       });
 
-      if (response.ok) {
-        updateNodeData(projectId, nodeId, { status: "ready" });
-      } else {
-        throw new Error(`Server returned ${response.status}`);
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => null);
+        throw new Error(errBody?.message ?? `Server returned ${response.status}`);
       }
+
+      if (response.body) {
+        const reader = response.body.getReader();
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+      }
+
+      updateNodeData(projectId, nodeId, { status: "ready" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed");
       updateNodeData(projectId, nodeId, { status: "error" });
