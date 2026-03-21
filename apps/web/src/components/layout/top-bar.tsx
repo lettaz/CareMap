@@ -3,6 +3,7 @@ import { Search, PanelRight, MessageSquare, ChevronRight } from "lucide-react";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useActiveProject } from "@/hooks/use-active-project";
 import { Button } from "@/components/ui/button";
+import { CareMapLogo } from "@/components/shared/caremap-logo";
 
 export function TopBar() {
   const togglePanel = useAgentStore((s) => s.togglePanel);
@@ -13,9 +14,9 @@ export function TopBar() {
       <div className="flex min-w-0 items-center gap-2">
         <Link
           to="/"
-          className="shrink-0 text-lg font-semibold text-cm-text-primary transition-opacity hover:opacity-80"
+          className="shrink-0 transition-opacity hover:opacity-80"
         >
-          CareMap
+          <CareMapLogo size={22} textClassName="text-cm-text-primary" />
         </Link>
         <span className="hidden sm:inline shrink-0 rounded bg-cm-accent-subtle px-1.5 py-0.5 text-xs font-medium text-cm-accent">
           alpha

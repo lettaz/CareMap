@@ -13,7 +13,6 @@ import {
   GitMerge,
   ShieldCheck,
   HardDriveDownload,
-  Trash2,
   Loader2,
   Plus,
   MessageSquare,
@@ -42,6 +41,7 @@ import {
 } from "@/components/ai-elements/suggestion";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { ToolResultRenderer } from "@/components/agent/tool-result-renderer";
+import { CareMapMark } from "@/components/shared/caremap-logo";
 import { cn } from "@/lib/utils";
 import type { NodeCategory } from "@/lib/types";
 
@@ -94,16 +94,20 @@ const TOOL_FOLLOW_UPS: Record<string, string[]> = {
   explain_lineage: ["Query harmonized data", "Run a quality check"],
 };
 
+function extractToolName(part: { type: string; toolName?: string }): string | null {
+  if (part.type === "dynamic-tool") return part.toolName ?? null;
+  if (part.type.startsWith("tool-")) return part.type.slice(5);
+  return null;
+}
+
 function deriveContextualSuggestions(messages: UIMessage[]): string[] {
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
   if (!lastAssistant?.parts) return DEFAULT_SUGGESTIONS;
 
   const toolNames: string[] = [];
   for (const part of lastAssistant.parts) {
-    if ((part.type === "dynamic-tool" || part.type.startsWith("tool-")) && "toolName" in part) {
-      const name = (part as { toolName?: string }).toolName;
-      if (name) toolNames.push(name);
-    }
+    const name = extractToolName(part as { type: string; toolName?: string });
+    if (name) toolNames.push(name);
   }
 
   if (toolNames.length === 0) return DEFAULT_SUGGESTIONS;
@@ -209,7 +213,6 @@ export function AgentPanel() {
     switchSession,
     deleteSession,
     updateMessages,
-    clearSession: clearSessionStore,
   } = useChatSessionStore();
 
   useEffect(() => {
@@ -305,11 +308,6 @@ export function AgentPanel() {
     setShowSessionList(false);
   }, [projectId, deleteSession, activeSessionId, setMessages]);
 
-  const clearChat = useCallback(() => {
-    if (!projectId || !activeSessionId) return;
-    clearSessionStore(projectId, activeSessionId);
-    setMessages([]);
-  }, [setMessages, projectId, activeSessionId, clearSessionStore]);
 
   const nodeContextConsumedRef = useRef<string | null>(null);
 
@@ -514,104 +512,79 @@ export function AgentPanel() {
 
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden bg-cm-bg-app">
-      <div className="flex items-center justify-between shrink-0 px-3 pt-2.5 pb-1">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] font-medium text-cm-text-tertiary">CareMap AI</span>
-          {activeSession && activeSession.title !== "New Chat" && (
-            <span className="text-[10px] text-cm-text-tertiary truncate max-w-[120px]">
-              · {activeSession.title}
-            </span>
-          )}
+      {/* Session tab bar */}
+      <div className="flex items-center shrink-0 border-b border-cm-border-primary bg-cm-bg-surface">
+        <div className="flex flex-1 items-center overflow-x-auto min-w-0">
+          {sessions.slice(0, 6).map((s) => {
+            const isActive = s.id === activeSessionId;
+            return (
+              <div key={s.id} className={cn("group relative flex items-center shrink-0 max-w-[160px]")}>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchSession(s.id)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium transition-colors min-w-0",
+                    isActive
+                      ? "text-cm-text-primary border-b-2 border-cm-accent"
+                      : "text-cm-text-tertiary hover:text-cm-text-secondary border-b-2 border-transparent",
+                  )}
+                >
+                  <MessageSquare className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{s.title}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex h-4 w-4 items-center justify-center rounded text-cm-text-tertiary hover:text-red-500 transition-all"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
-        <div className="flex items-center gap-0.5">
+
+        <div className="flex items-center gap-0.5 px-1.5 shrink-0">
           <button
             type="button"
             onClick={handleNewChat}
             disabled={isStreaming}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary transition-colors disabled:opacity-40"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary transition-colors disabled:opacity-40"
             title="New chat"
           >
-            <Plus className="h-3 w-3" />
+            <Plus className="h-3.5 w-3.5" />
           </button>
 
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowSessionList((v) => !v)}
-              disabled={isStreaming}
-              className="flex h-6 w-6 items-center justify-center rounded-md text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary transition-colors disabled:opacity-40"
-              title="Chat history"
-            >
-              <MoreHorizontal className="h-3 w-3" />
-            </button>
-
-            {showSessionList && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowSessionList(false)} />
-                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-cm-border-primary bg-cm-bg-surface py-1 shadow-lg max-h-72 overflow-y-auto">
-                  <p className="px-3 py-1.5 text-[10px] font-medium text-cm-text-tertiary uppercase tracking-wide">
-                    Chat Sessions
-                  </p>
-                  {sessions.length === 0 && (
-                    <p className="px-3 py-2 text-[11px] text-cm-text-tertiary">No sessions yet</p>
-                  )}
-                  {sessions.map((s) => (
-                    <div
-                      key={s.id}
-                      className={cn(
-                        "flex items-center gap-2 px-3 py-2 text-left transition-colors group",
-                        s.id === activeSessionId
-                          ? "bg-cm-accent-subtle"
-                          : "hover:bg-cm-bg-hover",
-                      )}
-                    >
+          {sessions.length > 6 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowSessionList((v) => !v)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary transition-colors"
+                title="More chats"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+              {showSessionList && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowSessionList(false)} />
+                  <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-cm-border-primary bg-cm-bg-surface py-1 shadow-lg max-h-64 overflow-y-auto">
+                    {sessions.slice(6).map((s) => (
                       <button
+                        key={s.id}
                         type="button"
                         onClick={() => handleSwitchSession(s.id)}
-                        className="flex flex-1 items-center gap-2 min-w-0"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-cm-text-secondary hover:bg-cm-bg-hover transition-colors"
                       >
-                        <MessageSquare className={cn(
-                          "h-3 w-3 shrink-0",
-                          s.id === activeSessionId ? "text-cm-accent" : "text-cm-text-tertiary",
-                        )} />
-                        <div className="flex-1 min-w-0">
-                          <p className={cn(
-                            "text-[11px] truncate",
-                            s.id === activeSessionId ? "text-cm-accent font-medium" : "text-cm-text-secondary",
-                          )}>
-                            {s.title}
-                          </p>
-                          <p className="text-[9px] text-cm-text-tertiary">
-                            {s.messages.length} message{s.messages.length !== 1 ? "s" : ""}
-                          </p>
-                        </div>
+                        <MessageSquare className="h-3 w-3 shrink-0 text-cm-text-tertiary" />
+                        <span className="truncate">{s.title}</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}
-                        className="shrink-0 opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-cm-text-tertiary hover:text-red-500 hover:bg-red-50 transition-all"
-                        title="Delete session"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                  {hasMessages && (
-                    <div className="border-t border-cm-border-subtle mt-1 pt-1">
-                      <button
-                        type="button"
-                        onClick={clearChat}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-[11px] text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                        Clear current chat
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -997,12 +970,10 @@ function AgentEmptyState({ onSuggestionClick }: { onSuggestionClick: (text: stri
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-5 px-5 overflow-auto">
       <div className="text-center">
-        <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-cm-accent-subtle">
-          <Sparkles className="h-5 w-5 text-cm-accent" />
-        </div>
-        <h3 className="text-xs font-semibold text-cm-text-primary">CareMap AI</h3>
+        <CareMapMark size={32} className="mx-auto mb-3" />
+        <h3 className="text-xs font-semibold text-cm-text-primary">What can I help with?</h3>
         <p className="mt-1 text-[11px] text-cm-text-secondary leading-relaxed max-w-[260px] mx-auto">
-          Ask me to profile sources, suggest mappings, investigate anomalies, or query your harmonised data.
+          Profile sources, suggest mappings, investigate anomalies, or query your harmonised data.
         </p>
       </div>
 
