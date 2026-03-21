@@ -163,7 +163,7 @@ function PipelineResult({ data, toolName }: { data: Record<string, unknown>; too
   const isCleaning = toolName === "execute_cleaning";
   const label = isCleaning ? "Cleaning" : "Harmonization";
   const targetCategory = isCleaning ? "source" : "harmonize";
-  const targetNode = pipelineNodes.find((n) => n.category === targetCategory);
+  const targetNode = pipelineNodes.find((n) => n.data.category === targetCategory);
 
   const rowsBefore = data.rowsBefore as number | undefined;
   const rowsAfter = data.rowsAfter as number | undefined;
@@ -235,7 +235,7 @@ function SchemaResult({ data }: { data: Record<string, unknown> }) {
   const [activated, setActivated] = useState(status === "active");
   const [expandedTable, setExpandedTable] = useState<string | null>(tables?.[0]?.name ?? null);
 
-  const transformNode = pipelineNodes.find((n) => n.category === "transform");
+  const transformNode = pipelineNodes.find((n) => n.data.category === "transform");
 
   const handleActivate = useCallback(async () => {
     if (!projectId || !schemaId || activated) return;
@@ -251,7 +251,7 @@ function SchemaResult({ data }: { data: Record<string, unknown> }) {
           status: "running",
         });
 
-        const sourceNodes = pipelineNodes.filter((n) => n.category === "source" && n.data.sourceFileId);
+        const sourceNodes = pipelineNodes.filter((n) => n.data.category === "source" && n.data.sourceFileId);
         if (sourceNodes.length > 0) {
           setPendingMessage({
             text: "The target schema has been activated. Now generate field mappings for the connected sources",
@@ -439,7 +439,7 @@ function MappingProposalResult({ data }: { data: Record<string, unknown> }) {
   const [bulkAccepting, setBulkAccepting] = useState(false);
   const [bulkResult, setBulkResult] = useState<number | null>(null);
 
-  const transformNode = pipelineNodes.find((n) => n.category === "transform");
+  const transformNode = pipelineNodes.find((n) => n.data.category === "transform");
   const pendingCount = mappings?.filter((m) => m.status === "pending").length ?? 0;
   const acceptedCount = mappings?.filter((m) => m.status === "accepted").length ?? 0;
 

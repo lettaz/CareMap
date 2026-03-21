@@ -17,10 +17,6 @@ interface SessionIndex {
   sessionIds: string[];
 }
 
-function storageKey(projectId: string) {
-  return `${STORAGE_PREFIX}:${projectId}`;
-}
-
 function indexKey(projectId: string) {
   return `${STORAGE_PREFIX}-index:${projectId}`;
 }

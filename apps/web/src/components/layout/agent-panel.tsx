@@ -255,10 +255,7 @@ export function AgentPanel() {
     [projectId],
   );
 
-  const chatKey = activeSessionId ?? "default";
-
   const chat = useChat({
-    key: chatKey,
     transport,
     messages: initialMessages,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
