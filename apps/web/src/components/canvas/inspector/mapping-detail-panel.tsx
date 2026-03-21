@@ -13,7 +13,12 @@ import {
   GitMerge,
   CircleDot,
   Link2,
+  Pencil,
+  Save,
+  Plus,
+  Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
@@ -26,7 +31,14 @@ import {
   bulkAcceptMappings,
   type FieldMappingDTO,
 } from "@/lib/api/mappings";
-import { fetchActiveSchema, activateSchema, type TargetSchemaDTO, type SchemaTableDTO } from "@/lib/api/schemas";
+import {
+  fetchActiveSchema,
+  activateSchema,
+  updateSchema,
+  type TargetSchemaDTO,
+  type SchemaTableDTO,
+  type SchemaColumnDTO,
+} from "@/lib/api/schemas";
 import { cn } from "@/lib/utils";
 
 interface MappingDetailPanelProps {
@@ -73,6 +85,9 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [activating, setActivating] = useState(false);
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editedTables, setEditedTables] = useState<SchemaTableDTO[] | null>(null);
+  const [savingSchema, setSavingSchema] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const wasRunningRef = useRef(false);
 
@@ -190,6 +205,71 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
     } catch { /* silent */ }
     setActivating(false);
   }, [projectId, schema, nodeId, updateNodeData, connectedSourceNodes, setPendingMessage]);
+
+  const handleStartEdit = useCallback(() => {
+    if (!schema) return;
+    setEditedTables(JSON.parse(JSON.stringify(schema.tables)));
+    setEditMode(true);
+  }, [schema]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditMode(false);
+    setEditedTables(null);
+  }, []);
+
+  const handleSaveSchema = useCallback(async () => {
+    if (!projectId || !schema || !editedTables) return;
+    setSavingSchema(true);
+    try {
+      const updated = await updateSchema(projectId, schema.id, { tables: editedTables });
+      setSchema(updated);
+      setEditMode(false);
+      setEditedTables(null);
+      toast.success("Schema updated");
+    } catch (err) {
+      toast.error("Failed to save schema", { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setSavingSchema(false);
+    }
+  }, [projectId, schema, editedTables]);
+
+  const handleEditColumn = useCallback(
+    (tableName: string, colIndex: number, field: keyof SchemaColumnDTO, value: string | boolean) => {
+      setEditedTables((prev) => {
+        if (!prev) return prev;
+        return prev.map((t) => {
+          if (t.name !== tableName) return t;
+          const cols = [...t.columns];
+          cols[colIndex] = { ...cols[colIndex], [field]: value };
+          return { ...t, columns: cols };
+        });
+      });
+    },
+    [],
+  );
+
+  const handleAddColumn = useCallback((tableName: string) => {
+    setEditedTables((prev) => {
+      if (!prev) return prev;
+      return prev.map((t) => {
+        if (t.name !== tableName) return t;
+        return {
+          ...t,
+          columns: [...t.columns, { name: "new_column", type: "text", description: "", required: false }],
+        };
+      });
+    });
+  }, []);
+
+  const handleRemoveColumn = useCallback((tableName: string, colIndex: number) => {
+    setEditedTables((prev) => {
+      if (!prev) return prev;
+      return prev.map((t) => {
+        if (t.name !== tableName) return t;
+        return { ...t, columns: t.columns.filter((_, i) => i !== colIndex) };
+      });
+    });
+  }, []);
 
   const handleViewChat = useCallback(() => {
     if (!projectId) return;
@@ -324,74 +404,108 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
         </div>
       ) : (
         <>
-          {/* Table tabs */}
-          <div className="flex items-center gap-0 border-b border-cm-border-primary shrink-0 overflow-x-auto">
-            {tabList.map((table) => {
-              const count = tableGroups.get(table.name)?.length ?? 0;
-              const isActive = table.name === currentTab;
-              return (
-                <button
-                  key={table.name}
-                  onClick={() => setActiveTab(table.name)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium border-b-2 whitespace-nowrap transition-colors",
-                    isActive
-                      ? "border-cm-accent text-cm-accent"
-                      : "border-transparent text-cm-text-tertiary hover:text-cm-text-secondary",
-                  )}
-                >
-                  {formatTableName(table.name)}
-                  {count > 0 && (
-                    <span className={cn(
-                      "text-[9px] px-1 rounded-full",
-                      isActive ? "bg-cm-accent/10 text-cm-accent" : "bg-cm-bg-elevated text-cm-text-tertiary",
-                    )}>
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+          {/* Table tabs + edit toggle */}
+          <div className="flex items-center border-b border-cm-border-primary shrink-0">
+            <div className="flex flex-1 items-center gap-0 overflow-x-auto">
+              {tabList.map((table) => {
+                const count = tableGroups.get(table.name)?.length ?? 0;
+                const isActive = table.name === currentTab;
+                return (
+                  <button
+                    key={table.name}
+                    onClick={() => setActiveTab(table.name)}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium border-b-2 whitespace-nowrap transition-colors",
+                      isActive
+                        ? "border-cm-accent text-cm-accent"
+                        : "border-transparent text-cm-text-tertiary hover:text-cm-text-secondary",
+                    )}
+                  >
+                    {formatTableName(table.name)}
+                    {count > 0 && (
+                      <span className={cn(
+                        "text-[9px] px-1 rounded-full",
+                        isActive ? "bg-cm-accent/10 text-cm-accent" : "bg-cm-bg-elevated text-cm-text-tertiary",
+                      )}>
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {schema && (
+              <div className="flex items-center gap-1 px-2 shrink-0">
+                {editMode ? (
+                  <>
+                    <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={handleCancelEdit}>
+                      Cancel
+                    </Button>
+                    <Button size="sm" className="h-6 text-[10px] gap-1" onClick={handleSaveSchema} disabled={savingSchema}>
+                      {savingSchema ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                      Save
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1" onClick={handleStartEdit}>
+                    <Pencil className="h-3 w-3" />
+                    Edit
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Table content */}
           <div className="flex-1 overflow-auto">
-            {currentSchemaTable && (
-              <div className="px-4 py-2.5 border-b border-cm-border-subtle flex items-center gap-2">
-                <CircleDot className="h-3.5 w-3.5 text-cm-text-tertiary shrink-0" />
-                <span className="font-mono text-xs font-medium text-cm-text-primary">{currentSchemaTable.name}</span>
-                {currentSchemaTable.description && (
-                  <span className="text-[10px] text-cm-text-tertiary truncate">
-                    — {currentSchemaTable.description}
-                  </span>
-                )}
-                <span className="ml-auto text-[10px] text-cm-text-tertiary shrink-0">
-                  {currentMappings.filter((m) => m.status === "accepted").length}/{currentSchemaTable.columns.length} covered
-                </span>
-              </div>
-            )}
-
-            {currentSchemaTable?.columns.map((schemaCol) => {
-              const mapping = currentMappings.find((m) => m.target_column === schemaCol.name);
-              return (
-                <SchemaColumnRow
-                  key={schemaCol.name}
-                  schemaCol={schemaCol}
-                  mapping={mapping}
-                  onAccept={mapping ? () => handleAccept(mapping.id) : undefined}
-                  onReject={mapping ? () => handleReject(mapping.id) : undefined}
-                />
-              );
-            })}
-
-            {!currentSchemaTable && currentMappings.map((m) => (
-              <LegacyMappingRow
-                key={m.id}
-                mapping={m}
-                onAccept={() => handleAccept(m.id)}
-                onReject={() => handleReject(m.id)}
+            {editMode && editedTables ? (
+              <SchemaEditor
+                tables={editedTables}
+                currentTab={currentTab ?? ""}
+                onEditColumn={handleEditColumn}
+                onAddColumn={handleAddColumn}
+                onRemoveColumn={handleRemoveColumn}
               />
-            ))}
+            ) : (
+              <>
+                {currentSchemaTable && (
+                  <div className="px-4 py-2.5 border-b border-cm-border-subtle flex items-center gap-2">
+                    <CircleDot className="h-3.5 w-3.5 text-cm-text-tertiary shrink-0" />
+                    <span className="font-mono text-xs font-medium text-cm-text-primary">{currentSchemaTable.name}</span>
+                    {currentSchemaTable.description && (
+                      <span className="text-[10px] text-cm-text-tertiary truncate">
+                        — {currentSchemaTable.description}
+                      </span>
+                    )}
+                    <span className="ml-auto text-[10px] text-cm-text-tertiary shrink-0">
+                      {currentMappings.filter((m) => m.status === "accepted").length}/{currentSchemaTable.columns.length} covered
+                    </span>
+                  </div>
+                )}
+
+                {currentSchemaTable?.columns.map((schemaCol) => {
+                  const mapping = currentMappings.find((m) => m.target_column === schemaCol.name);
+                  return (
+                    <SchemaColumnRow
+                      key={schemaCol.name}
+                      schemaCol={schemaCol}
+                      mapping={mapping}
+                      onAccept={mapping ? () => handleAccept(mapping.id) : undefined}
+                      onReject={mapping ? () => handleReject(mapping.id) : undefined}
+                    />
+                  );
+                })}
+
+                {!currentSchemaTable && currentMappings.map((m) => (
+                  <LegacyMappingRow
+                    key={m.id}
+                    mapping={m}
+                    onAccept={() => handleAccept(m.id)}
+                    onReject={() => handleReject(m.id)}
+                  />
+                ))}
+              </>
+            )}
           </div>
         </>
       )}
@@ -601,6 +715,105 @@ function StatBadge({
     <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium", bg, color)}>
       <Icon className="h-2.5 w-2.5" /> {count} {label}
     </span>
+  );
+}
+
+const COLUMN_TYPES = ["text", "integer", "float", "boolean", "date", "timestamp", "uuid", "json"];
+
+function SchemaEditor({
+  tables,
+  currentTab,
+  onEditColumn,
+  onAddColumn,
+  onRemoveColumn,
+}: {
+  tables: SchemaTableDTO[];
+  currentTab: string;
+  onEditColumn: (tableName: string, colIndex: number, field: keyof SchemaColumnDTO, value: string | boolean) => void;
+  onAddColumn: (tableName: string) => void;
+  onRemoveColumn: (tableName: string, colIndex: number) => void;
+}) {
+  const table = tables.find((t) => t.name === currentTab);
+  if (!table) return null;
+
+  return (
+    <div className="divide-y divide-cm-border-subtle">
+      <div className="px-4 py-2.5 flex items-center gap-2 bg-cm-bg-elevated/30">
+        <CircleDot className="h-3.5 w-3.5 text-cm-accent shrink-0" />
+        <span className="font-mono text-xs font-medium text-cm-text-primary">{table.name}</span>
+        <span className="text-[10px] text-cm-text-tertiary">
+          {table.columns.length} column{table.columns.length !== 1 ? "s" : ""}
+        </span>
+        <button
+          type="button"
+          onClick={() => onAddColumn(table.name)}
+          className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-cm-accent hover:bg-cm-accent-subtle transition-colors"
+        >
+          <Plus className="h-3 w-3" /> Add Column
+        </button>
+      </div>
+
+      {table.columns.map((col, i) => (
+        <div key={`${col.name}-${i}`} className="px-4 py-2.5 space-y-2">
+          <div className="flex items-start gap-2">
+            <div className="flex-1 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={col.name}
+                  onChange={(e) => onEditColumn(table.name, i, "name", e.target.value)}
+                  className="font-mono text-[11px] font-medium text-cm-text-primary bg-transparent border border-cm-border-subtle rounded px-2 py-1 w-full focus:outline-none focus:border-cm-accent"
+                  placeholder="column_name"
+                />
+                <select
+                  value={col.type}
+                  onChange={(e) => onEditColumn(table.name, i, "type", e.target.value)}
+                  className="text-[10px] text-cm-text-secondary bg-cm-bg-elevated border border-cm-border-subtle rounded px-1.5 py-1 focus:outline-none focus:border-cm-accent w-24 shrink-0"
+                >
+                  {COLUMN_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+
+              <input
+                type="text"
+                value={col.description ?? ""}
+                onChange={(e) => onEditColumn(table.name, i, "description", e.target.value)}
+                className="text-[10px] text-cm-text-secondary bg-transparent border border-cm-border-subtle rounded px-2 py-1 w-full focus:outline-none focus:border-cm-accent"
+                placeholder="Description (optional)"
+              />
+            </div>
+
+            <div className="flex flex-col items-center gap-1 pt-1 shrink-0">
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={col.required ?? false}
+                  onChange={(e) => onEditColumn(table.name, i, "required", e.target.checked)}
+                  className="h-3 w-3 rounded border-cm-border-subtle text-cm-accent focus:ring-cm-accent"
+                />
+                <span className="text-[9px] text-cm-text-tertiary">Req</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => onRemoveColumn(table.name, i)}
+                className="flex h-5 w-5 items-center justify-center rounded text-cm-text-tertiary hover:text-red-500 hover:bg-red-50 transition-colors"
+                title="Remove column"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {table.columns.length === 0 && (
+        <div className="px-4 py-6 text-center text-[11px] text-cm-text-tertiary">
+          No columns. Click "Add Column" to get started.
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -15,12 +15,16 @@ import {
   HardDriveDownload,
   Trash2,
   Loader2,
+  Plus,
+  MessageSquare,
+  MoreHorizontal,
 } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import type { UIMessage } from "ai";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
+import { useChatSessionStore } from "@/lib/stores/chat-session-store";
 import { apiUrl } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -185,32 +189,6 @@ function buildMentionMarkup(mention: MentionChip): string {
   }
 }
 
-function chatStorageKey(projectId: string) {
-  return `caremap-chat:${projectId}`;
-}
-
-function loadPersistedMessages(projectId: string | undefined): UIMessage[] {
-  if (!projectId) return [];
-  try {
-    const raw = localStorage.getItem(chatStorageKey(projectId));
-    if (!raw) return [];
-    return JSON.parse(raw) as UIMessage[];
-  } catch {
-    return [];
-  }
-}
-
-function persistMessages(projectId: string | undefined, messages: UIMessage[]) {
-  if (!projectId) return;
-  try {
-    if (messages.length === 0) {
-      localStorage.removeItem(chatStorageKey(projectId));
-    } else {
-      localStorage.setItem(chatStorageKey(projectId), JSON.stringify(messages));
-    }
-  } catch { /* quota exceeded — silent */ }
-}
-
 const EMPTY_NODES: never[] = [];
 
 export function AgentPanel() {
@@ -222,10 +200,32 @@ export function AgentPanel() {
     projectId ? s.pipelines[projectId]?.nodes ?? EMPTY_NODES : EMPTY_NODES,
   );
 
+  const {
+    sessions,
+    activeSessionId,
+    loaded: sessionsLoaded,
+    loadSessions,
+    createSession,
+    switchSession,
+    deleteSession,
+    updateMessages,
+    clearSession: clearSessionStore,
+  } = useChatSessionStore();
+
+  useEffect(() => {
+    if (projectId && !sessionsLoaded) loadSessions(projectId);
+  }, [projectId, sessionsLoaded, loadSessions]);
+
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeSessionId) ?? null,
+    [sessions, activeSessionId],
+  );
+
   const [draft, setDraft] = useState("");
   const [mentions, setMentions] = useState<MentionChip[]>([]);
   const [model, setModel] = useState("auto");
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [showSessionList, setShowSessionList] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIdx, setMentionIdx] = useState(0);
   const [mentionTriggerPos, setMentionTriggerPos] = useState<number | null>(null);
@@ -233,7 +233,10 @@ export function AgentPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mentionListRef = useRef<HTMLDivElement>(null);
 
-  const initialMessages = useMemo(() => loadPersistedMessages(projectId), [projectId]);
+  const initialMessages = useMemo(
+    () => activeSession?.messages ?? [],
+    [activeSession?.id],
+  );
 
   const filteredNodes = useMemo(() => {
     if (mentionQuery === null) return [];
@@ -252,7 +255,10 @@ export function AgentPanel() {
     [projectId],
   );
 
+  const chatKey = activeSessionId ?? "default";
+
   const chat = useChat({
+    key: chatKey,
     transport,
     messages: initialMessages,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
@@ -269,15 +275,44 @@ export function AgentPanel() {
   );
 
   useEffect(() => {
-    if (status === "ready") {
-      persistMessages(projectId, messages);
+    if (status === "ready" && projectId && activeSessionId) {
+      updateMessages(projectId, activeSessionId, messages);
     }
-  }, [messages, status, projectId]);
+  }, [messages, status, projectId, activeSessionId, updateMessages]);
+
+  const handleNewChat = useCallback(() => {
+    if (!projectId) return;
+    createSession(projectId);
+    setMessages([]);
+    setDraft("");
+    setMentions([]);
+    setShowSessionList(false);
+  }, [projectId, createSession, setMessages]);
+
+  const handleSwitchSession = useCallback((sessionId: string) => {
+    if (!projectId) return;
+    switchSession(projectId, sessionId);
+    const session = sessions.find((s) => s.id === sessionId);
+    setMessages(session?.messages ?? []);
+    setDraft("");
+    setMentions([]);
+    setShowSessionList(false);
+  }, [projectId, switchSession, sessions, setMessages]);
+
+  const handleDeleteSession = useCallback((sessionId: string) => {
+    if (!projectId) return;
+    deleteSession(projectId, sessionId);
+    if (sessionId === activeSessionId) {
+      setMessages([]);
+    }
+    setShowSessionList(false);
+  }, [projectId, deleteSession, activeSessionId, setMessages]);
 
   const clearChat = useCallback(() => {
+    if (!projectId || !activeSessionId) return;
+    clearSessionStore(projectId, activeSessionId);
     setMessages([]);
-    persistMessages(projectId, []);
-  }, [setMessages, projectId]);
+  }, [setMessages, projectId, activeSessionId, clearSessionStore]);
 
   const nodeContextConsumedRef = useRef<string | null>(null);
 
@@ -319,6 +354,8 @@ export function AgentPanel() {
     if (_consumedPendingKeys.has(msgKey)) return;
     _consumedPendingKeys.add(msgKey);
 
+    if (!activeSessionId) createSession(projectId);
+
     const { text, mentions: pendingMentions, transformNodeId } = pendingMessage;
     setPendingMessage(null);
     openPanel();
@@ -337,7 +374,7 @@ export function AgentPanel() {
     sendMessage({ text: composed });
 
     setTimeout(() => { _consumedPendingKeys.delete(msgKey); }, 5000);
-  }, [pendingMessage, projectId, status, setPendingMessage, openPanel, sendMessage]);
+  }, [pendingMessage, projectId, status, setPendingMessage, openPanel, sendMessage, activeSessionId, createSession]);
 
   useEffect(() => {
     if (status !== "ready" || !activeTransformRef.current || !projectId) return;
@@ -380,6 +417,9 @@ export function AgentPanel() {
   const handleSend = useCallback(() => {
     if (!projectId) return;
     if (!draft.trim() && mentions.length === 0) return;
+
+    if (!activeSessionId) createSession(projectId);
+
     const mentionParts = mentions.map(buildMentionMarkup).join(" ");
     const text = mentionParts ? `${mentionParts} ${draft.trim()}` : draft.trim();
     sendMessage({ text });
@@ -387,7 +427,7 @@ export function AgentPanel() {
     setMentions([]);
     setMentionQuery(null);
     setMentionTriggerPos(null);
-  }, [draft, mentions, sendMessage, projectId]);
+  }, [draft, mentions, sendMessage, projectId, activeSessionId, createSession]);
 
   const handleSuggestionClick = useCallback(
     (suggestion: string) => {
@@ -477,20 +517,106 @@ export function AgentPanel() {
 
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden bg-cm-bg-app">
-      {hasMessages && (
-        <div className="flex items-center justify-between shrink-0 px-3 pt-2.5 pb-1">
+      <div className="flex items-center justify-between shrink-0 px-3 pt-2.5 pb-1">
+        <div className="flex items-center gap-1.5">
           <span className="text-[11px] font-medium text-cm-text-tertiary">CareMap AI</span>
+          {activeSession && activeSession.title !== "New Chat" && (
+            <span className="text-[10px] text-cm-text-tertiary truncate max-w-[120px]">
+              · {activeSession.title}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5">
           <button
             type="button"
-            onClick={clearChat}
+            onClick={handleNewChat}
             disabled={isStreaming}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary transition-colors disabled:opacity-40"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary transition-colors disabled:opacity-40"
+            title="New chat"
           >
-            <Trash2 className="h-3 w-3" />
-            Clear
+            <Plus className="h-3 w-3" />
           </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowSessionList((v) => !v)}
+              disabled={isStreaming}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-cm-text-secondary transition-colors disabled:opacity-40"
+              title="Chat history"
+            >
+              <MoreHorizontal className="h-3 w-3" />
+            </button>
+
+            {showSessionList && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowSessionList(false)} />
+                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-cm-border-primary bg-cm-bg-surface py-1 shadow-lg max-h-72 overflow-y-auto">
+                  <p className="px-3 py-1.5 text-[10px] font-medium text-cm-text-tertiary uppercase tracking-wide">
+                    Chat Sessions
+                  </p>
+                  {sessions.length === 0 && (
+                    <p className="px-3 py-2 text-[11px] text-cm-text-tertiary">No sessions yet</p>
+                  )}
+                  {sessions.map((s) => (
+                    <div
+                      key={s.id}
+                      className={cn(
+                        "flex items-center gap-2 px-3 py-2 text-left transition-colors group",
+                        s.id === activeSessionId
+                          ? "bg-cm-accent-subtle"
+                          : "hover:bg-cm-bg-hover",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchSession(s.id)}
+                        className="flex flex-1 items-center gap-2 min-w-0"
+                      >
+                        <MessageSquare className={cn(
+                          "h-3 w-3 shrink-0",
+                          s.id === activeSessionId ? "text-cm-accent" : "text-cm-text-tertiary",
+                        )} />
+                        <div className="flex-1 min-w-0">
+                          <p className={cn(
+                            "text-[11px] truncate",
+                            s.id === activeSessionId ? "text-cm-accent font-medium" : "text-cm-text-secondary",
+                          )}>
+                            {s.title}
+                          </p>
+                          <p className="text-[9px] text-cm-text-tertiary">
+                            {s.messages.length} message{s.messages.length !== 1 ? "s" : ""}
+                          </p>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}
+                        className="shrink-0 opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded text-cm-text-tertiary hover:text-red-500 hover:bg-red-50 transition-all"
+                        title="Delete session"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {hasMessages && (
+                    <div className="border-t border-cm-border-subtle mt-1 pt-1">
+                      <button
+                        type="button"
+                        onClick={clearChat}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-[11px] text-cm-text-tertiary hover:bg-cm-bg-hover hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        Clear current chat
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      )}
+      </div>
 
       {/* Messages or empty state */}
       {hasMessages ? (
@@ -812,8 +938,17 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
           }
 
           if (toolPart.state === "output-available" && toolPart.output != null) {
-            const expandByDefault = toolName === "generate_artifact" || toolName === "suggest_cleaning";
-            const displayLabel = toolName === "suggest_cleaning" ? "Cleaning Plan Ready" : label;
+            const expandByDefault = toolName === "generate_artifact"
+              || toolName === "suggest_cleaning"
+              || toolName === "propose_target_schema"
+              || toolName === "propose_mappings";
+
+            const RESULT_LABELS: Record<string, string> = {
+              suggest_cleaning: "Cleaning Plan Ready",
+              propose_target_schema: "Target Schema Proposed",
+              propose_mappings: "Field Mappings Ready",
+            };
+            const displayLabel = RESULT_LABELS[toolName] ?? label;
             return (
               <CollapsibleToolResult
                 key={i}

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import {
   Download, Table2, BarChart3, CheckCircle2, XCircle, Pin, Check,
   Wand2, ChevronDown, ChevronRight, AlertTriangle,
+  Zap, ExternalLink, CheckCheck, ArrowRight, Columns3,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
@@ -10,8 +11,13 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { CodeBlock } from "@/components/ai-elements/code-block";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
+import { usePipelineStore } from "@/lib/stores/pipeline-store";
+import { useAgentStore } from "@/lib/stores/agent-store";
+import { activateSchema } from "@/lib/api/schemas";
+import { bulkAcceptMappings } from "@/lib/api/mappings";
 import { cn } from "@/lib/utils";
 
 const CHART_COLORS = [
@@ -41,6 +47,8 @@ export function ToolResultRenderer({ toolName, output }: ToolResultRendererProps
       return <PipelineResult data={data} toolName={toolName} />;
     case "propose_target_schema":
       return <SchemaResult data={data} />;
+    case "propose_mappings":
+      return <MappingProposalResult data={data} />;
     case "run_script":
       return <ScriptResult data={data} />;
     case "profile_columns":
@@ -145,70 +153,446 @@ function ExportResult({ data }: { data: Record<string, unknown> }) {
 }
 
 function PipelineResult({ data, toolName }: { data: Record<string, unknown>; toolName: string }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  const selectNode = usePipelineStore((s) => s.selectNode);
+  const pipelineNodes = usePipelineStore((s) =>
+    projectId ? s.pipelines[projectId]?.nodes ?? [] : [],
+  );
+
   const success = data.success as boolean;
-  const label = toolName === "execute_cleaning" ? "Cleaning" : "Harmonization";
+  const isCleaning = toolName === "execute_cleaning";
+  const label = isCleaning ? "Cleaning" : "Harmonization";
+  const targetCategory = isCleaning ? "source" : "harmonize";
+  const targetNode = pipelineNodes.find((n) => n.category === targetCategory);
+
+  const rowsBefore = data.rowsBefore as number | undefined;
+  const rowsAfter = data.rowsAfter as number | undefined;
+  const tablesHarmonized = data.tablesHarmonized as number | undefined;
 
   return (
     <div className={cn(
-      "flex items-center gap-2 rounded-lg border p-3 text-xs",
-      success
-        ? "border-green-200 bg-green-50 text-green-700"
-        : "border-red-200 bg-red-50 text-red-700"
+      "rounded-lg border overflow-hidden",
+      success ? "border-green-200" : "border-red-200",
     )}>
-      {success ? (
-        <CheckCircle2 className="h-4 w-4 shrink-0" />
-      ) : (
-        <XCircle className="h-4 w-4 shrink-0" />
+      <div className={cn(
+        "flex items-center gap-2 px-3 py-2.5 text-xs",
+        success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700",
+      )}>
+        {success ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+        <span className="font-medium">{label}</span>
+        <span>{success ? "completed" : `failed: ${String(data.error ?? "")}`}</span>
+      </div>
+
+      {success && (rowsBefore != null || tablesHarmonized != null) && (
+        <div className="flex items-center gap-3 px-3 py-2 bg-white border-t border-green-100 text-[11px] text-cm-text-secondary">
+          {rowsBefore != null && rowsAfter != null && (
+            <span>{rowsBefore} → {rowsAfter} rows</span>
+          )}
+          {tablesHarmonized != null && (
+            <span>{tablesHarmonized} table{tablesHarmonized !== 1 ? "s" : ""} harmonized</span>
+          )}
+        </div>
       )}
-      <span className="font-medium">{label}</span>
-      <span>{success ? "completed successfully" : `failed: ${String(data.error ?? "")}`}</span>
+
+      {success && targetNode && projectId && (
+        <div className="flex items-center px-3 py-2 bg-cm-bg-elevated/40 border-t border-cm-border-subtle">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 text-[11px] ml-auto"
+            onClick={() => selectNode(projectId, targetNode.id)}
+          >
+            <ExternalLink className="h-3 w-3" />
+            View in Panel
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
 function SchemaResult({ data }: { data: Record<string, unknown> }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  const selectNode = usePipelineStore((s) => s.selectNode);
+  const updateNodeData = usePipelineStore((s) => s.updateNodeData);
+  const setPendingMessage = useAgentStore((s) => s.setPendingMessage);
+  const pipelineNodes = usePipelineStore((s) =>
+    projectId ? s.pipelines[projectId]?.nodes ?? [] : [],
+  );
+
+  const schemaId = data.schemaId as string | undefined;
+  const status = data.status as string | undefined;
   const tables = data.tables as Array<{
     name: string;
     description?: string;
+    columnCount?: number;
     columns: Array<string | { name: string; type: string; description?: string; required?: boolean }>;
   }> | undefined;
+  const reasoning = data.reasoning as string | undefined;
+  const totalCols = tables?.reduce((sum, t) => sum + (t.columns?.length ?? t.columnCount ?? 0), 0) ?? 0;
 
-  if (!tables?.length) return null;
+  const [activating, setActivating] = useState(false);
+  const [activated, setActivated] = useState(status === "active");
+  const [expandedTable, setExpandedTable] = useState<string | null>(tables?.[0]?.name ?? null);
+
+  const transformNode = pipelineNodes.find((n) => n.category === "transform");
+
+  const handleActivate = useCallback(async () => {
+    if (!projectId || !schemaId || activated) return;
+    setActivating(true);
+    try {
+      await activateSchema(projectId, schemaId);
+      setActivated(true);
+      toast.success("Schema activated");
+
+      if (transformNode) {
+        updateNodeData(projectId, transformNode.id, {
+          schemaStatus: "active",
+          status: "running",
+        });
+
+        const sourceNodes = pipelineNodes.filter((n) => n.category === "source" && n.data.sourceFileId);
+        if (sourceNodes.length > 0) {
+          setPendingMessage({
+            text: "The target schema has been activated. Now generate field mappings for the connected sources",
+            mentions: sourceNodes.map((n) => ({
+              label: n.data.label,
+              id: n.id,
+              sourceFileId: n.data.sourceFileId as string,
+              category: "source" as const,
+            })),
+            transformNodeId: transformNode.id,
+          });
+        }
+      }
+    } catch (err) {
+      toast.error("Failed to activate", { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setActivating(false);
+    }
+  }, [projectId, schemaId, activated, transformNode, pipelineNodes, updateNodeData, setPendingMessage]);
+
+  const handleOpenPanel = useCallback(() => {
+    if (!projectId || !transformNode) return;
+    selectNode(projectId, transformNode.id);
+  }, [projectId, transformNode, selectNode]);
+
+  if (!tables?.length) return <GenericResult data={data} />;
 
   return (
-    <div className="space-y-2 rounded-lg border border-cm-border-primary bg-cm-bg-surface p-3">
-      <p className="text-xs font-medium text-cm-text-secondary flex items-center gap-1.5">
-        <Table2 className="h-3.5 w-3.5" /> Proposed Schema
-      </p>
-      {tables.map((table) => (
-        <div key={table.name} className="rounded-md border border-cm-border-subtle p-2">
-          <p className="text-xs font-semibold text-cm-text-primary mb-1">{table.name}</p>
-          {table.description && (
-            <p className="text-[10px] text-cm-text-tertiary mb-1.5">{table.description}</p>
-          )}
-          <div className="space-y-0.5">
-            {table.columns.map((col) => {
-              const isObj = typeof col === "object";
-              const name = isObj ? col.name : col;
-              const type = isObj ? col.type : undefined;
-              const required = isObj ? col.required : false;
-              return (
-                <div key={name} className="flex items-center gap-2 text-xs">
-                  <span className="font-mono text-cm-text-primary">{name}</span>
-                  {type && (
-                    <span className="rounded bg-cm-bg-elevated px-1 py-0.5 text-[10px] text-cm-text-tertiary font-mono">
-                      {type}
-                    </span>
-                  )}
-                  {required && (
-                    <span className="text-[9px] text-cm-accent font-medium uppercase">req</span>
-                  )}
-                </div>
-              );
-            })}
+    <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-cm-border-subtle bg-gradient-to-r from-indigo-50 to-violet-50">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-indigo-100">
+            <Columns3 className="h-3.5 w-3.5 text-indigo-700" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-cm-text-primary">
+              Target Schema
+            </p>
+            <p className="text-[10px] text-cm-text-tertiary">
+              {tables.length} table{tables.length !== 1 ? "s" : ""} · {totalCols} columns
+            </p>
           </div>
         </div>
-      ))}
+        <Badge
+          variant="outline"
+          className={cn(
+            "text-[9px] px-1.5 py-0 h-4",
+            activated ? "border-green-300 text-green-700 bg-green-50" : "border-amber-300 text-amber-700 bg-amber-50",
+          )}
+        >
+          {activated ? "Active" : "Draft"}
+        </Badge>
+      </div>
+
+      {reasoning && (
+        <div className="px-3 py-2 border-b border-cm-border-subtle text-[11px] text-cm-text-secondary leading-relaxed bg-cm-bg-elevated/30">
+          {reasoning}
+        </div>
+      )}
+
+      <div className="divide-y divide-cm-border-subtle">
+        {tables.map((table) => {
+          const isExpanded = expandedTable === table.name;
+          const cols = table.columns ?? [];
+          return (
+            <div key={table.name}>
+              <button
+                type="button"
+                onClick={() => setExpandedTable(isExpanded ? null : table.name)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-cm-bg-elevated/50 transition-colors"
+              >
+                {isExpanded
+                  ? <ChevronDown className="h-3 w-3 text-cm-text-tertiary shrink-0" />
+                  : <ChevronRight className="h-3 w-3 text-cm-text-tertiary shrink-0" />}
+                <span className="text-xs font-semibold text-cm-text-primary">{table.name}</span>
+                <span className="text-[10px] text-cm-text-tertiary">
+                  {cols.length} col{cols.length !== 1 ? "s" : ""}
+                </span>
+                {table.description && (
+                  <span className="ml-auto text-[10px] text-cm-text-tertiary truncate max-w-[140px]">
+                    {table.description}
+                  </span>
+                )}
+              </button>
+              {isExpanded && cols.length > 0 && (
+                <div className="px-3 pb-2 pl-8">
+                  <div className="rounded-md border border-cm-border-subtle overflow-hidden">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="bg-cm-bg-elevated">
+                          <th className="px-2 py-1 text-left font-medium text-cm-text-tertiary">Column</th>
+                          <th className="px-2 py-1 text-left font-medium text-cm-text-tertiary">Type</th>
+                          <th className="px-2 py-1 text-left font-medium text-cm-text-tertiary w-8"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cols.map((col) => {
+                          const isObj = typeof col === "object";
+                          const name = isObj ? col.name : col;
+                          const type = isObj ? col.type : "—";
+                          const required = isObj ? col.required : false;
+                          return (
+                            <tr key={name} className="border-t border-cm-border-subtle">
+                              <td className="px-2 py-1 font-mono text-cm-text-primary">{name}</td>
+                              <td className="px-2 py-1">
+                                <span className="rounded bg-cm-bg-elevated px-1 py-0.5 text-[10px] text-cm-text-tertiary font-mono">
+                                  {type}
+                                </span>
+                              </td>
+                              <td className="px-2 py-1">
+                                {required && (
+                                  <span className="text-[9px] text-cm-accent font-semibold">REQ</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-2 px-3 py-2.5 border-t border-cm-border-subtle bg-cm-bg-elevated/40">
+        {!activated && schemaId && (
+          <Button
+            size="sm"
+            className="h-7 gap-1.5 text-[11px]"
+            onClick={handleActivate}
+            disabled={activating}
+          >
+            {activating ? (
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            ) : (
+              <Zap className="h-3 w-3" />
+            )}
+            {activating ? "Activating..." : "Activate Schema"}
+          </Button>
+        )}
+        {activated && (
+          <span className="flex items-center gap-1 text-[11px] text-green-600 font-medium">
+            <CheckCircle2 className="h-3 w-3" /> Activated
+          </span>
+        )}
+        {transformNode && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 text-[11px] ml-auto"
+            onClick={handleOpenPanel}
+          >
+            <ExternalLink className="h-3 w-3" />
+            Open in Panel
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MappingProposalResult({ data }: { data: Record<string, unknown> }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  const selectNode = usePipelineStore((s) => s.selectNode);
+  const pipelineNodes = usePipelineStore((s) =>
+    projectId ? s.pipelines[projectId]?.nodes ?? [] : [],
+  );
+
+  const success = data.success as boolean | undefined;
+  const mappings = data.mappings as Array<{
+    id: string;
+    sourceColumn: string;
+    targetTable: string;
+    targetColumn: string;
+    confidence: number;
+    reasoning?: string;
+    status: string;
+  }> | undefined;
+  const totalMappings = (data.totalMappings as number) ?? mappings?.length ?? 0;
+  const autoAccepted = (data.autoAccepted as number) ?? 0;
+
+  const [bulkAccepting, setBulkAccepting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<number | null>(null);
+
+  const transformNode = pipelineNodes.find((n) => n.category === "transform");
+  const pendingCount = mappings?.filter((m) => m.status === "pending").length ?? 0;
+  const acceptedCount = mappings?.filter((m) => m.status === "accepted").length ?? 0;
+
+  const handleBulkAccept = useCallback(async () => {
+    if (!projectId || bulkAccepting) return;
+    setBulkAccepting(true);
+    try {
+      const result = await bulkAcceptMappings(projectId);
+      setBulkResult(result.accepted);
+      toast.success(`Accepted ${result.accepted} mapping${result.accepted !== 1 ? "s" : ""}`);
+    } catch (err) {
+      toast.error("Failed to accept mappings", { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setBulkAccepting(false);
+    }
+  }, [projectId, bulkAccepting]);
+
+  const handleOpenPanel = useCallback(() => {
+    if (!projectId || !transformNode) return;
+    selectNode(projectId, transformNode.id);
+  }, [projectId, transformNode, selectNode]);
+
+  if (success === false) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+        <XCircle className="h-4 w-4 shrink-0" />
+        {String(data.error ?? "Mapping proposal failed")}
+      </div>
+    );
+  }
+
+  if (!mappings?.length) return <GenericResult data={data} />;
+
+  const byTable = new Map<string, typeof mappings>();
+  for (const m of mappings) {
+    const existing = byTable.get(m.targetTable) ?? [];
+    existing.push(m);
+    byTable.set(m.targetTable, existing);
+  }
+
+  return (
+    <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-cm-border-subtle bg-gradient-to-r from-emerald-50 to-teal-50">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-100">
+            <ArrowRight className="h-3.5 w-3.5 text-emerald-700" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-cm-text-primary">Field Mappings</p>
+            <p className="text-[10px] text-cm-text-tertiary">
+              {totalMappings} mapping{totalMappings !== 1 ? "s" : ""}
+              {autoAccepted > 0 && ` · ${autoAccepted} auto-accepted`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {acceptedCount > 0 && (
+            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-green-300 text-green-700 bg-green-50">
+              {acceptedCount} accepted
+            </Badge>
+          )}
+          {pendingCount > 0 && (
+            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-300 text-amber-700 bg-amber-50">
+              {pendingCount} pending
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="bg-cm-bg-elevated border-b border-cm-border-subtle">
+              <th className="px-2.5 py-1.5 text-left font-medium text-cm-text-tertiary">Source</th>
+              <th className="px-1 py-1.5 text-center text-cm-text-tertiary">→</th>
+              <th className="px-2.5 py-1.5 text-left font-medium text-cm-text-tertiary">Target</th>
+              <th className="px-2.5 py-1.5 text-right font-medium text-cm-text-tertiary">Conf.</th>
+              <th className="px-2.5 py-1.5 text-center font-medium text-cm-text-tertiary">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...byTable.entries()].map(([table, tableMappings]) => (
+              tableMappings.map((m, i) => (
+                <tr key={m.id} className="border-b border-cm-border-subtle last:border-b-0">
+                  <td className="px-2.5 py-1.5 font-mono text-cm-text-primary whitespace-nowrap">
+                    {m.sourceColumn}
+                  </td>
+                  <td className="px-1 py-1.5 text-center text-cm-text-tertiary">→</td>
+                  <td className="px-2.5 py-1.5 whitespace-nowrap">
+                    <span className="font-mono text-cm-text-primary">{m.targetColumn}</span>
+                    {i === 0 && (
+                      <span className="ml-1.5 rounded bg-cm-bg-elevated px-1 py-0.5 text-[9px] text-cm-text-tertiary">
+                        {table}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2.5 py-1.5 text-right tabular-nums">
+                    <span className={cn(
+                      "font-medium",
+                      m.confidence >= 0.85 ? "text-green-600" : m.confidence >= 0.5 ? "text-amber-600" : "text-red-500",
+                    )}>
+                      {Math.round(m.confidence * 100)}%
+                    </span>
+                  </td>
+                  <td className="px-2.5 py-1.5 text-center">
+                    {m.status === "accepted" ? (
+                      <CheckCircle2 className="h-3 w-3 text-green-500 mx-auto" />
+                    ) : m.status === "rejected" ? (
+                      <XCircle className="h-3 w-3 text-red-400 mx-auto" />
+                    ) : (
+                      <span className="inline-block h-2 w-2 rounded-full bg-amber-400 mx-auto" />
+                    )}
+                  </td>
+                </tr>
+              ))
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center gap-2 px-3 py-2.5 border-t border-cm-border-subtle bg-cm-bg-elevated/40">
+        {pendingCount > 0 && bulkResult === null && (
+          <Button
+            size="sm"
+            className="h-7 gap-1.5 text-[11px]"
+            onClick={handleBulkAccept}
+            disabled={bulkAccepting}
+          >
+            {bulkAccepting ? (
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            ) : (
+              <CheckCheck className="h-3 w-3" />
+            )}
+            {bulkAccepting ? "Accepting..." : "Accept High Confidence"}
+          </Button>
+        )}
+        {bulkResult !== null && (
+          <span className="flex items-center gap-1 text-[11px] text-green-600 font-medium">
+            <CheckCircle2 className="h-3 w-3" /> {bulkResult} accepted
+          </span>
+        )}
+        {transformNode && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 text-[11px] ml-auto"
+            onClick={handleOpenPanel}
+          >
+            <ExternalLink className="h-3 w-3" />
+            Review in Panel
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
