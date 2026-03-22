@@ -90,8 +90,23 @@ export interface FieldMappingRow {
   status: "pending" | "accepted" | "rejected";
   reviewed_by: string | null;
   reviewed_at: string | null;
+  node_id: string | null;
 }
 export type FieldMappingInsert = Omit<FieldMappingRow, "id">;
+
+// ── Target Schemas ──
+
+export interface TargetSchemaRow {
+  id: string;
+  project_id: string;
+  version: number;
+  status: "draft" | "active" | "archived";
+  tables: unknown;
+  proposed_by: "ai" | "user";
+  created_at: string;
+  node_id: string | null;
+}
+export type TargetSchemaInsert = Omit<TargetSchemaRow, "id" | "created_at">;
 
 // ── Pipeline State ──
 
@@ -125,6 +140,7 @@ export interface SemanticEntityRow {
   row_count: number | null;
   created_from: string[];
   updated_at: string;
+  node_id: string | null;
 }
 export type SemanticEntityInsert = Omit<SemanticEntityRow, "id" | "updated_at">;
 
@@ -168,6 +184,7 @@ export interface QualityAlertRow {
   detection_method: string | null;
   acknowledged: boolean;
   created_at: string;
+  node_id: string | null;
 }
 export type QualityAlertInsert = Omit<QualityAlertRow, "id" | "created_at">;
 

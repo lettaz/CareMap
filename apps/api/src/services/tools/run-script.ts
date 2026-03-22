@@ -15,9 +15,10 @@ export const runScriptTool = tool({
     code: z.string().describe("Python code to execute. Assign result to `_result`."),
     description: z.string().describe("Human-readable description of what this script does"),
     sourceFileIds: z.array(z.string().uuid()).optional(),
+    nodeId: z.string().optional().describe("When loading harmonized data, scope to entities from this harmonize node"),
   }),
   needsApproval: async (input) => !(await isYoloMode(input.projectId)),
-  execute: async ({ projectId, code, description, sourceFileIds }) => {
+  execute: async ({ projectId, code, description, sourceFileIds, nodeId }) => {
     try {
       const storagePaths: string[] = [];
       const nameMap = new Map<string, string>();
@@ -47,10 +48,14 @@ export const runScriptTool = tool({
           if (path) trackName(path, f.filename as string);
         }
       } else {
-        const { data: entities } = await supabase
+        let entitiesQuery = supabase
           .from("semantic_entities")
           .select("entity_name, parquet_path")
           .eq("project_id", projectId);
+
+        if (nodeId) entitiesQuery = entitiesQuery.eq("node_id", nodeId);
+
+        const { data: entities } = await entitiesQuery;
 
         for (const e of entities ?? []) {
           if (e.parquet_path) trackName(e.parquet_path, e.entity_name as string);

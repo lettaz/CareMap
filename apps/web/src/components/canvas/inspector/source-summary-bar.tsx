@@ -14,6 +14,7 @@ interface SourceSummaryBarProps {
   preview: SourcePreview;
   onAiClick?: () => void;
   onRequestCleanup?: () => void;
+  showCleanupCta?: boolean;
 }
 
 function getHealthColor(completeness: number): string {
@@ -28,7 +29,7 @@ function getHealthBg(completeness: number): string {
   return "bg-cm-error-subtle";
 }
 
-export function SourceSummaryBar({ preview, onAiClick, onRequestCleanup }: SourceSummaryBarProps) {
+export function SourceSummaryBar({ preview, onAiClick, onRequestCleanup, showCleanupCta = true }: SourceSummaryBarProps) {
   const pct = Math.round(preview.completeness * 100);
   const hasIssues = preview.issueCount > 0;
   const [cleanupRequested, setCleanupRequested] = useState(false);
@@ -108,21 +109,23 @@ export function SourceSummaryBar({ preview, onAiClick, onRequestCleanup }: Sourc
               </div>
             )}
 
-            <button
-              onClick={handleCleanup}
-              disabled={cleanupRequested}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-all",
-                cleanupRequested
-                  ? "bg-cm-accent-subtle text-cm-accent cursor-default"
-                  : "bg-white border border-amber-200 text-amber-800 hover:bg-amber-50 hover:border-amber-300 active:scale-[0.99]",
-              )}
-            >
-              <Wand2 className={cn("h-3.5 w-3.5", cleanupRequested && "animate-pulse")} />
-              {cleanupRequested
-                ? "Cleanup plan requested — check the chat"
-                : `Request cleanup plan for ${preview.issueCount} column${preview.issueCount !== 1 ? "s" : ""}`}
-            </button>
+            {showCleanupCta && (
+              <button
+                onClick={handleCleanup}
+                disabled={cleanupRequested}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-all",
+                  cleanupRequested
+                    ? "bg-cm-accent-subtle text-cm-accent cursor-default"
+                    : "bg-white border border-amber-200 text-amber-800 hover:bg-amber-50 hover:border-amber-300 active:scale-[0.99]",
+                )}
+              >
+                <Wand2 className={cn("h-3.5 w-3.5", cleanupRequested && "animate-pulse")} />
+                {cleanupRequested
+                  ? "Cleanup plan requested — check the chat"
+                  : `Request cleanup plan for ${preview.issueCount} column${preview.issueCount !== 1 ? "s" : ""}`}
+              </button>
+            )}
           </div>
         )}
       </div>

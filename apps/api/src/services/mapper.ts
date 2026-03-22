@@ -10,15 +10,18 @@ interface TargetTable {
   columns: Array<{ name: string; type: string; description?: string; required?: boolean }>;
 }
 
-async function getProjectSchema(projectId: string): Promise<string> {
-  const { data } = await supabase
+async function getProjectSchema(projectId: string, nodeId?: string): Promise<string> {
+  let query = supabase
     .from("target_schemas")
     .select("tables")
     .eq("project_id", projectId)
     .eq("status", "active")
     .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
+
+  if (nodeId) query = query.eq("node_id", nodeId);
+
+  const { data } = await query.maybeSingle();
 
   if (!data) {
     throw new Error(
@@ -84,9 +87,10 @@ export async function generateMappings(
   projectId: string,
   sourceFileId: string,
   columnProfiles: SourceColumnContext[],
+  nodeId?: string,
 ): Promise<FieldMappingRow[]> {
   const [schemaText, thresholds] = await Promise.all([
-    getProjectSchema(projectId),
+    getProjectSchema(projectId, nodeId),
     getProjectThresholds(projectId),
   ]);
 
@@ -127,8 +131,15 @@ export async function generateMappings(
       status: accepted ? "accepted" : pending ? "pending" : "rejected",
       reviewed_by: accepted ? "auto" : null,
       reviewed_at: accepted ? now : null,
+      node_id: nodeId ?? null,
     };
   });
+
+  await supabase
+    .from("field_mappings")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("source_file_id", sourceFileId);
 
   const { data, error } = await supabase.from("field_mappings").insert(inserts).select();
   if (error) throw new Error(`Failed to save mappings: ${error.message}`);
@@ -166,12 +177,15 @@ export async function updateMappingStatus(
 export async function getMappingsByProject(
   projectId: string,
   opts?: { from?: number; to?: number },
+  nodeId?: string,
 ): Promise<{ data: FieldMappingRow[]; total: number }> {
   let query = supabase
     .from("field_mappings")
     .select("*", { count: "exact" })
     .eq("project_id", projectId)
     .order("confidence", { ascending: false });
+
+  if (nodeId) query = query.eq("node_id", nodeId);
 
   if (opts?.from !== undefined && opts?.to !== undefined) {
     query = query.range(opts.from, opts.to);

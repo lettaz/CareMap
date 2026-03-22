@@ -13,17 +13,20 @@ export interface FieldMappingDTO {
   reasoning: string;
   status: MappingStatus;
   sample_value: string | null;
+  node_id?: string | null;
 }
 
 export function fetchMappings(
   projectId: string,
   pagination?: { page: number; pageSize: number },
+  nodeId?: string,
 ): Promise<PaginatedResponse<FieldMappingDTO>> {
   const params = new URLSearchParams({ projectId });
   if (pagination) {
     params.set("page", String(pagination.page));
     params.set("pageSize", String(pagination.pageSize));
   }
+  if (nodeId) params.set("nodeId", nodeId);
   return apiFetch<PaginatedResponse<FieldMappingDTO>>(`/api/mappings?${params}`);
 }
 
@@ -45,8 +48,11 @@ export function updateMapping(
 export function bulkAcceptMappings(
   projectId: string,
   threshold = 0.85,
+  nodeId?: string,
 ): Promise<{ accepted: number }> {
-  return apiFetch<{ accepted: number }>(`/api/mappings/bulk-accept?projectId=${projectId}`, {
+  const params = new URLSearchParams({ projectId });
+  if (nodeId) params.set("nodeId", nodeId);
+  return apiFetch<{ accepted: number }>(`/api/mappings/bulk-accept?${params}`, {
     method: "POST",
     body: JSON.stringify({ threshold }),
   });

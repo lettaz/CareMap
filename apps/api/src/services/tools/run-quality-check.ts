@@ -7,12 +7,21 @@ export const runQualityCheckTool = tool({
   description: "Load harmonized Parquet files and compute quality metrics: null rates, range violations, duplicate counts. Writes quality alerts to Supabase.",
   inputSchema: z.object({
     projectId: z.string().uuid(),
+    nodeId: z.string().optional().describe("The quality node ID for scoping alerts"),
+    harmonizeNodeId: z
+      .string()
+      .optional()
+      .describe("Upstream harmonize node ID to scope entity checks"),
   }),
-  execute: async ({ projectId }) => {
-    const { data: entities } = await supabase
+  execute: async ({ projectId, nodeId, harmonizeNodeId }) => {
+    let entitiesQuery = supabase
       .from("semantic_entities")
       .select("parquet_path, entity_name")
       .eq("project_id", projectId);
+    if (harmonizeNodeId) {
+      entitiesQuery = entitiesQuery.eq("node_id", harmonizeNodeId);
+    }
+    const { data: entities } = await entitiesQuery;
 
     if (!entities?.length) {
       return { message: "No harmonized data to check", alerts: [] };
@@ -76,6 +85,7 @@ print(json.dumps({"alerts": alerts, "tablesChecked": checked}))
     for (const alert of output.alerts) {
       await supabase.from("quality_alerts").insert({
         project_id: projectId,
+        node_id: nodeId ?? null,
         severity: alert.severity as "critical" | "warning" | "info",
         summary: alert.summary,
         affected_count: alert.affectedCount,

@@ -22,10 +22,12 @@ export interface TargetSchemaDTO {
   version: number;
   created_at: string;
   updated_at: string;
+  node_id?: string | null;
 }
 
-export function fetchActiveSchema(projectId: string): Promise<TargetSchemaDTO | null> {
-  return apiFetch<TargetSchemaDTO | null>(`/api/projects/${projectId}/schema`);
+export function fetchActiveSchema(projectId: string, nodeId?: string): Promise<TargetSchemaDTO | null> {
+  const params = nodeId ? `?nodeId=${nodeId}` : "";
+  return apiFetch<TargetSchemaDTO | null>(`/api/projects/${projectId}/schema${params}`);
 }
 
 export function fetchAllSchemas(projectId: string): Promise<TargetSchemaDTO[]> {
@@ -36,10 +38,11 @@ export function createSchema(
   projectId: string,
   tables: SchemaTableDTO[],
   proposedBy: "ai" | "user" = "user",
+  nodeId?: string,
 ): Promise<TargetSchemaDTO> {
   return apiFetch<TargetSchemaDTO>(`/api/projects/${projectId}/schema`, {
     method: "POST",
-    body: JSON.stringify({ tables, proposedBy }),
+    body: JSON.stringify({ tables, proposedBy, nodeId }),
   });
 }
 
@@ -57,8 +60,10 @@ export function updateSchema(
 export function activateSchema(
   projectId: string,
   schemaId: string,
+  nodeId?: string,
 ): Promise<TargetSchemaDTO> {
-  return apiFetch<TargetSchemaDTO>(`/api/projects/${projectId}/schema/${schemaId}/activate`, {
+  const params = nodeId ? `?nodeId=${nodeId}` : "";
+  return apiFetch<TargetSchemaDTO>(`/api/projects/${projectId}/schema/${schemaId}/activate${params}`, {
     method: "POST",
   });
 }

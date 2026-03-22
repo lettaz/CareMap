@@ -19,6 +19,7 @@ const tableSchema = z.object({
 const createSchema = z.object({
   tables: z.array(tableSchema).min(1),
   proposedBy: z.enum(["ai", "user"]).default("user"),
+  nodeId: z.string().optional(),
 });
 
 const updateSchema = z.object({
@@ -27,29 +28,34 @@ const updateSchema = z.object({
 });
 
 export const schemaRoutes: FastifyPluginAsync = async (app) => {
-  app.get<{ Params: { projectId: string } }>("/:projectId/schema", async (request) => {
+  app.get<{ Params: { projectId: string }; Querystring: { nodeId?: string } }>("/:projectId/schema", async (request) => {
     const { projectId } = request.params;
+    const { nodeId } = request.query;
 
-    const { data: active } = await supabase
+    let activeQuery = supabase
       .from("target_schemas")
       .select()
       .eq("project_id", projectId)
       .eq("status", "active")
       .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
 
+    if (nodeId) activeQuery = activeQuery.eq("node_id", nodeId);
+
+    const { data: active } = await activeQuery.maybeSingle();
     if (active) return active;
 
-    const { data: draft } = await supabase
+    let draftQuery = supabase
       .from("target_schemas")
       .select()
       .eq("project_id", projectId)
       .eq("status", "draft")
       .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
 
+    if (nodeId) draftQuery = draftQuery.eq("node_id", nodeId);
+
+    const { data: draft } = await draftQuery.maybeSingle();
     if (draft) return draft;
 
     return null;
@@ -93,6 +99,7 @@ export const schemaRoutes: FastifyPluginAsync = async (app) => {
           status: "draft",
           tables: parsed.data.tables,
           proposed_by: parsed.data.proposedBy,
+          node_id: parsed.data.nodeId ?? null,
         })
         .select()
         .single();
@@ -125,16 +132,21 @@ export const schemaRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  app.post<{ Params: { projectId: string; schemaId: string } }>(
+  app.post<{ Params: { projectId: string; schemaId: string }; Querystring: { nodeId?: string } }>(
     "/:projectId/schema/:schemaId/activate",
     async (request) => {
       const { projectId, schemaId } = request.params;
+      const { nodeId } = request.query;
 
-      await supabase
+      let archiveQuery = supabase
         .from("target_schemas")
         .update({ status: "archived" })
         .eq("project_id", projectId)
         .eq("status", "active");
+
+      if (nodeId) archiveQuery = archiveQuery.eq("node_id", nodeId);
+
+      await archiveQuery;
 
       const { data, error } = await supabase
         .from("target_schemas")

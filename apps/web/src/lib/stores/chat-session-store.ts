@@ -106,7 +106,7 @@ function deriveTitle(messages: UIMessage[]): string {
 interface ChatSessionState {
   sessions: ChatSession[];
   activeSessionId: string | null;
-  loaded: boolean;
+  loadedProjectId: string | null;
 
   loadSessions: (projectId: string) => void;
   createSession: (projectId: string) => string;
@@ -120,7 +120,7 @@ interface ChatSessionState {
 export const useChatSessionStore = create<ChatSessionState>()((set, get) => ({
   sessions: [],
   activeSessionId: null,
-  loaded: false,
+  loadedProjectId: null,
 
   loadSessions: (projectId) => {
     const index = loadIndex(projectId);
@@ -148,7 +148,7 @@ export const useChatSessionStore = create<ChatSessionState>()((set, get) => ({
       activeId = sessions[0]?.id ?? null;
     }
 
-    set({ sessions, activeSessionId: activeId, loaded: true });
+    set({ sessions, activeSessionId: activeId, loadedProjectId: projectId });
   },
 
   createSession: (projectId) => {

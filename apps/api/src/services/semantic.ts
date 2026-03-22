@@ -1,5 +1,5 @@
 import { supabase } from "../config/supabase.js";
-import { downloadFile, manifestPath } from "./storage.js";
+import { downloadFile, manifestPath, harmonizedTablePath } from "./storage.js";
 import type {
   SemanticEntityRow,
   SemanticFieldRow,
@@ -33,6 +33,7 @@ export interface SemanticContext {
     targetColumn: string;
     status: string;
     confidence: number;
+    nodeId?: string;
   }>;
   entities: SemanticEntityRow[];
   fields: SemanticFieldRow[];
@@ -47,25 +48,33 @@ interface ManifestTable {
   columns: string[];
 }
 
-export async function updateSemanticLayer(projectId: string): Promise<void> {
+export async function updateSemanticLayer(projectId: string, nodeId?: string): Promise<void> {
   let manifest: { tables: ManifestTable[] };
 
   try {
-    const buffer = await downloadFile(manifestPath(projectId));
+    const buffer = await downloadFile(manifestPath(projectId, nodeId));
     manifest = JSON.parse(buffer.toString("utf-8")) as { tables: ManifestTable[] };
   } catch {
     return;
   }
 
-  await supabase.from("semantic_fields").delete().in(
-    "entity_id",
-    (await supabase.from("semantic_entities").select("id").eq("project_id", projectId)).data?.map((e) => e.id) ?? [],
-  );
-  await supabase.from("semantic_joins").delete().in(
-    "from_entity_id",
-    (await supabase.from("semantic_entities").select("id").eq("project_id", projectId)).data?.map((e) => e.id) ?? [],
-  );
-  await supabase.from("semantic_entities").delete().eq("project_id", projectId);
+  const scopeQuery = nodeId
+    ? supabase.from("semantic_entities").select("id").eq("project_id", projectId).eq("node_id", nodeId)
+    : supabase.from("semantic_entities").select("id").eq("project_id", projectId);
+
+  const existingEntityIds = (await scopeQuery).data?.map((e) => e.id) ?? [];
+
+  if (existingEntityIds.length > 0) {
+    await supabase.from("semantic_fields").delete().in("entity_id", existingEntityIds);
+    await supabase.from("semantic_joins").delete().in("from_entity_id", existingEntityIds);
+    await supabase.from("semantic_joins").delete().in("to_entity_id", existingEntityIds);
+
+    if (nodeId) {
+      await supabase.from("semantic_entities").delete().eq("project_id", projectId).eq("node_id", nodeId);
+    } else {
+      await supabase.from("semantic_entities").delete().eq("project_id", projectId);
+    }
+  }
 
   for (const table of manifest.tables) {
     const { data: entity } = await supabase
@@ -74,9 +83,10 @@ export async function updateSemanticLayer(projectId: string): Promise<void> {
         project_id: projectId,
         entity_name: table.name,
         description: `Harmonized ${table.name} table with ${table.rows} rows`,
-        parquet_path: `harmonized/${projectId}/${table.name}.csv`,
+        parquet_path: harmonizedTablePath(projectId, table.name, nodeId),
         row_count: table.rows,
         created_from: [],
+        node_id: nodeId ?? null,
       })
       .select()
       .single();
@@ -135,7 +145,12 @@ export async function updateSemanticLayer(projectId: string): Promise<void> {
   }
 }
 
-export async function getSemanticContext(projectId: string): Promise<SemanticContext> {
+export interface PipelineEdge {
+  source_node_id: string;
+  target_node_id: string;
+}
+
+export async function getSemanticContext(projectId: string): Promise<SemanticContext & { edges: PipelineEdge[] }> {
   const { data: sourceNodes } = await supabase
     .from("pipeline_nodes")
     .select("config")
@@ -158,6 +173,7 @@ export async function getSemanticContext(projectId: string): Promise<SemanticCon
     joinsResult,
     nodesResult,
     alertsResult,
+    edgesResult,
   ] = await Promise.all([
     supabase.from("projects").select().eq("id", projectId).single(),
     supabase.from("source_files").select().eq("project_id", projectId),
@@ -171,6 +187,7 @@ export async function getSemanticContext(projectId: string): Promise<SemanticCon
     supabase.from("semantic_joins").select(),
     supabase.from("pipeline_nodes").select().eq("project_id", projectId),
     supabase.from("quality_alerts").select("severity, summary").eq("project_id", projectId).eq("acknowledged", false).limit(10),
+    supabase.from("pipeline_edges").select("source_node_id, target_node_id").eq("project_id", projectId),
   ]);
 
   const project = projectResult.data;
@@ -188,6 +205,7 @@ export async function getSemanticContext(projectId: string): Promise<SemanticCon
   );
   const nodes = (nodesResult.data ?? []) as PipelineNodeRow[];
   const alerts = (alertsResult.data ?? []) as Array<{ severity: string; summary: string }>;
+  const edges = (edgesResult.data ?? []) as PipelineEdge[];
 
   return {
     projectName: project?.name ?? "",
@@ -216,6 +234,7 @@ export async function getSemanticContext(projectId: string): Promise<SemanticCon
         targetColumn: m.target_column,
         status: m.status,
         confidence: m.confidence,
+        nodeId: m.node_id ?? undefined,
       };
     }),
     entities,
@@ -223,5 +242,6 @@ export async function getSemanticContext(projectId: string): Promise<SemanticCon
     joins,
     pipelineNodes: nodes,
     alerts,
+    edges,
   };
 }

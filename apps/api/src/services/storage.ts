@@ -10,16 +10,22 @@ export function cleanedPath(projectId: string, sourceFileId: string): string {
   return `cleaned/${projectId}/${sourceFileId}/cleaned.csv`;
 }
 
-export function harmonizedDir(projectId: string): string {
-  return `harmonized/${projectId}`;
+export function harmonizedDir(projectId: string, nodeId?: string): string {
+  return nodeId
+    ? `harmonized/${projectId}/${nodeId}`
+    : `harmonized/${projectId}`;
 }
 
-export function harmonizedTablePath(projectId: string, tableName: string): string {
-  return `harmonized/${projectId}/${tableName}.csv`;
+export function harmonizedTablePath(projectId: string, tableName: string, nodeId?: string): string {
+  return nodeId
+    ? `harmonized/${projectId}/${nodeId}/${tableName}.csv`
+    : `harmonized/${projectId}/${tableName}.csv`;
 }
 
-export function manifestPath(projectId: string): string {
-  return `harmonized/${projectId}/manifest.json`;
+export function manifestPath(projectId: string, nodeId?: string): string {
+  return nodeId
+    ? `harmonized/${projectId}/${nodeId}/manifest.json`
+    : `harmonized/${projectId}/manifest.json`;
 }
 
 export async function uploadFile(
@@ -89,7 +95,7 @@ export function exportPath(projectId: string, filename: string): string {
   return `exports/${projectId}/${Date.now()}_${filename}`;
 }
 
-export async function listHarmonizedTables(projectId: string): Promise<string[]> {
-  const files = await listFiles(harmonizedDir(projectId));
+export async function listHarmonizedTables(projectId: string, nodeId?: string): Promise<string[]> {
+  const files = await listFiles(harmonizedDir(projectId, nodeId));
   return files.filter((f) => !f.endsWith("manifest.json"));
 }

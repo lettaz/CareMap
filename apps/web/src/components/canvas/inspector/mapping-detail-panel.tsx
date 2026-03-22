@@ -104,13 +104,13 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
     if (!projectId) return;
     try {
       const [res, s] = await Promise.all([
-        fetchMappings(projectId, { page: 1, pageSize: 200 }),
-        fetchActiveSchema(projectId),
+        fetchMappings(projectId, { page: 1, pageSize: 500 }, nodeId),
+        fetchActiveSchema(projectId, nodeId),
       ]);
       setAllMappings(res.data);
       setSchema(s);
     } catch { /* silent */ }
-  }, [projectId]);
+  }, [projectId, nodeId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -145,6 +145,16 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
     loadData().finally(() => setLoading(false));
   }, [loadData, nodeId]);
 
+  const dataVersion = node?.data.dataVersion as number | undefined;
+  const prevDataVersionRef = useRef(dataVersion);
+
+  useEffect(() => {
+    if (dataVersion && dataVersion !== prevDataVersionRef.current) {
+      prevDataVersionRef.current = dataVersion;
+      loadData();
+    }
+  }, [dataVersion, loadData]);
+
   useEffect(() => {
     if (isRunning) {
       wasRunningRef.current = true;
@@ -172,7 +182,7 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
     if (!projectId) return;
     setBulkLoading(true);
     try {
-      const { accepted } = await bulkAcceptMappings(projectId);
+      const { accepted } = await bulkAcceptMappings(projectId, 0.85, nodeId);
       if (accepted > 0) await loadData();
     } finally {
       setBulkLoading(false);
@@ -183,7 +193,7 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
     if (!projectId || !schema) return;
     setActivating(true);
     try {
-      const activated = await activateSchema(projectId, schema.id);
+      const activated = await activateSchema(projectId, schema.id, nodeId);
       setSchema(activated);
       updateNodeData(projectId, nodeId, {
         schemaStatus: activated.status as PipelineNodeData["schemaStatus"],
@@ -301,6 +311,18 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
     group.push(m);
     tableGroups.set(m.target_table, group);
   }
+
+  const sourceFileNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const n of connectedSourceNodes) {
+      const fileId = n.data.sourceFileId as string | undefined;
+      if (fileId) {
+        const label = n.data.label.replace(/\.[^.]+$/, "");
+        map.set(fileId, label);
+      }
+    }
+    return map;
+  }, [connectedSourceNodes]);
 
   const schemaTables = schema?.tables ?? [];
   const tabList = schemaTables.length > 0
@@ -484,14 +506,15 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
                 )}
 
                 {currentSchemaTable?.columns.map((schemaCol) => {
-                  const mapping = currentMappings.find((m) => m.target_column === schemaCol.name);
+                  const colMappings = currentMappings.filter((m) => m.target_column === schemaCol.name);
                   return (
                     <SchemaColumnRow
                       key={schemaCol.name}
                       schemaCol={schemaCol}
-                      mapping={mapping}
-                      onAccept={mapping ? () => handleAccept(mapping.id) : undefined}
-                      onReject={mapping ? () => handleReject(mapping.id) : undefined}
+                      mappings={colMappings}
+                      sourceNameMap={sourceFileNameMap}
+                      onAccept={handleAccept}
+                      onReject={handleReject}
                     />
                   );
                 })}
@@ -522,34 +545,37 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
 
 function SchemaColumnRow({
   schemaCol,
-  mapping,
+  mappings,
+  sourceNameMap,
   onAccept,
   onReject,
 }: {
   schemaCol: { name: string; type: string; description?: string; required?: boolean };
-  mapping?: FieldMappingDTO;
-  onAccept?: () => void;
-  onReject?: () => void;
+  mappings: FieldMappingDTO[];
+  sourceNameMap: Map<string, string>;
+  onAccept: (id: string) => void;
+  onReject: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const isDerived = mapping && (!mapping.source_file_id || mapping.source_column === "__derived__");
-  const isMapped = mapping && mapping.status === "accepted" && !isDerived;
-  const isPending = mapping?.status === "pending";
-  const isGap = !mapping;
+  const hasMapping = mappings.length > 0;
+  const primaryMapping = mappings[0];
+  const allAccepted = mappings.length > 0 && mappings.every((m) => m.status === "accepted" || m.source_column === "__derived__");
+  const hasPending = mappings.some((m) => m.status === "pending");
+  const allDerived = mappings.length > 0 && mappings.every((m) => !m.source_file_id || m.source_column === "__derived__");
 
-  const confidencePct = mapping ? Math.round(mapping.confidence * 100) : 0;
+  const sourceCount = mappings.filter((m) => m.source_file_id && m.source_column !== "__derived__").length;
 
   return (
     <div className="border-b border-cm-border-subtle">
       <button
         type="button"
-        onClick={() => mapping && setExpanded((v) => !v)}
+        onClick={() => hasMapping && setExpanded((v) => !v)}
         className={cn(
           "flex w-full items-center gap-2 px-4 py-2.5 text-left transition-colors",
-          mapping ? "hover:bg-cm-bg-elevated/50 cursor-pointer" : "cursor-default",
+          hasMapping ? "hover:bg-cm-bg-elevated/50 cursor-pointer" : "cursor-default",
         )}
       >
-        {mapping ? (
+        {hasMapping ? (
           expanded ? <ChevronDown className="h-3 w-3 text-cm-text-tertiary shrink-0" /> : <ChevronRight className="h-3 w-3 text-cm-text-tertiary shrink-0" />
         ) : (
           <div className="w-3" />
@@ -568,82 +594,113 @@ function SchemaColumnRow({
           )}
         </div>
 
-        {mapping && (
-          <div className="flex items-center gap-2 shrink-0">
-            {isMapped && (
-              <>
-                <span className="text-[10px] text-cm-text-secondary">← {mapping.source_column}</span>
-                <span className="text-[9px] font-medium text-cm-success flex items-center gap-0.5">
-                  <Check className="h-2.5 w-2.5" /> Mapped
-                </span>
-              </>
-            )}
-            {isDerived && (
-              <span className="text-[9px] font-medium text-purple-600 flex items-center gap-0.5">
-                auto <GitMerge className="h-2.5 w-2.5" /> Derived
-              </span>
-            )}
-            {isPending && (
-              <>
-                <span className="text-[10px] text-cm-text-secondary">← {mapping.source_column}</span>
-                <span className={cn(
-                  "text-[10px] font-medium tabular-nums",
-                  confidencePct >= 80 ? "text-cm-success" : confidencePct >= 60 ? "text-cm-warning" : "text-cm-error",
-                )}>
-                  {confidencePct}%
-                </span>
-                {onAccept && onReject && (
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={onAccept} className="flex h-5 w-5 items-center justify-center rounded bg-cm-success-subtle text-cm-success hover:bg-cm-success/20 transition-colors">
-                      <Check className="h-2.5 w-2.5" />
+        <div className="flex items-center gap-2 shrink-0">
+          {allAccepted && !allDerived && (
+            <span className="text-[9px] font-medium text-cm-success flex items-center gap-0.5">
+              <Check className="h-2.5 w-2.5" />
+              {sourceCount > 1 ? `${sourceCount} sources` : "Mapped"}
+            </span>
+          )}
+          {allDerived && (
+            <span className="text-[9px] font-medium text-purple-600 flex items-center gap-0.5">
+              auto <GitMerge className="h-2.5 w-2.5" /> Derived
+            </span>
+          )}
+          {hasPending && (
+            <span className="text-[9px] font-medium text-cm-warning flex items-center gap-0.5">
+              <AlertTriangle className="h-2.5 w-2.5" /> Review
+            </span>
+          )}
+          {!hasMapping && (
+            <span className="text-[9px] text-cm-text-tertiary italic">unmapped</span>
+          )}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="bg-cm-bg-elevated/40 px-4 pb-3 pt-1 ml-7 space-y-2">
+          {mappings.map((mapping) => {
+            const isDerived = !mapping.source_file_id || mapping.source_column === "__derived__";
+            const confidencePct = Math.round(mapping.confidence * 100);
+            const sourceName = mapping.source_file_id ? sourceNameMap.get(mapping.source_file_id) : null;
+
+            return (
+              <div key={mapping.id} className="rounded-md border border-cm-border-subtle bg-cm-bg-surface p-2 space-y-1.5">
+                {!isDerived && (
+                  <div className="flex items-center gap-2 text-[10px]">
+                    {sourceName && (
+                      <span className="text-[9px] font-medium text-cm-accent bg-cm-accent/10 rounded-full px-1.5 py-0.5 shrink-0">
+                        {sourceName}
+                      </span>
+                    )}
+                    <span className="text-cm-text-secondary font-mono">{mapping.source_column}</span>
+                    <span className="text-cm-text-tertiary">→</span>
+                    <span className="font-mono text-cm-text-primary font-medium">{mapping.target_column}</span>
+
+                    <span className={cn(
+                      "ml-auto font-medium tabular-nums",
+                      confidencePct >= 80 ? "text-cm-success" : confidencePct >= 60 ? "text-cm-warning" : "text-cm-error",
+                    )}>
+                      {confidencePct}%
+                    </span>
+                  </div>
+                )}
+
+                {isDerived && (
+                  <div className="flex items-center gap-1.5 text-[10px] text-purple-600">
+                    <GitMerge className="h-3 w-3" />
+                    <span className="font-medium">Auto-derived</span>
+                  </div>
+                )}
+
+                {mapping.sample_value && (
+                  <p className="text-[9px] text-cm-text-tertiary">
+                    Sample: <span className="font-mono">{mapping.sample_value}</span>
+                  </p>
+                )}
+
+                {mapping.reasoning && (
+                  <p className="text-[10px] text-cm-text-secondary flex items-start gap-1.5">
+                    <Sparkles className="h-3 w-3 text-cm-accent shrink-0 mt-0.5" />
+                    {mapping.reasoning}
+                  </p>
+                )}
+
+                {mapping.transformation && (
+                  <div className="rounded border border-cm-border-subtle bg-cm-bg-elevated p-1.5">
+                    <p className="text-[9px] text-cm-text-tertiary font-medium uppercase tracking-wide mb-0.5">Transform</p>
+                    <pre className="text-[10px] font-mono text-cm-text-primary whitespace-pre-wrap">{mapping.transformation}</pre>
+                  </div>
+                )}
+
+                {mapping.status === "pending" && (
+                  <div className="flex items-center gap-1 pt-1" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => onAccept(mapping.id)} className="flex h-5 items-center gap-1 rounded bg-cm-success-subtle text-cm-success hover:bg-cm-success/20 transition-colors px-2 text-[10px] font-medium">
+                      <Check className="h-2.5 w-2.5" /> Accept
                     </button>
-                    <button onClick={onReject} className="flex h-5 w-5 items-center justify-center rounded bg-cm-error-subtle text-cm-error hover:bg-cm-error/20 transition-colors">
-                      <XCircle className="h-2.5 w-2.5" />
+                    <button onClick={() => onReject(mapping.id)} className="flex h-5 items-center gap-1 rounded bg-cm-error-subtle text-cm-error hover:bg-cm-error/20 transition-colors px-2 text-[10px] font-medium">
+                      <XCircle className="h-2.5 w-2.5" /> Reject
                     </button>
                   </div>
                 )}
-              </>
-            )}
-            {mapping.status === "rejected" && (
-              <span className="text-[9px] font-medium text-cm-error px-1.5 py-0.5 rounded-full bg-cm-error-subtle">
-                rejected
-              </span>
-            )}
-          </div>
-        )}
 
-        {isGap && (
-          <span className="text-[9px] text-cm-text-tertiary italic shrink-0">unmapped</span>
-        )}
-      </button>
+                {mapping.status === "accepted" && !isDerived && (
+                  <span className="inline-flex text-[9px] font-medium text-cm-success items-center gap-0.5">
+                    <Check className="h-2.5 w-2.5" /> Accepted
+                  </span>
+                )}
 
-      {expanded && mapping && (
-        <div className="bg-cm-bg-elevated/40 px-4 pb-3 pt-1 ml-7 space-y-1.5">
-          {mapping.source_column && mapping.source_column !== "__derived__" && (
-            <div className="flex items-center gap-2 text-[10px]">
-              <span className="text-cm-text-tertiary font-mono">{mapping.source_column}</span>
-              {mapping.sample_value && (
-                <span className="text-cm-text-tertiary">Sample: {mapping.sample_value}</span>
-              )}
-              <span className={cn(
-                "ml-auto font-medium tabular-nums",
-                confidencePct >= 80 ? "text-cm-success" : confidencePct >= 60 ? "text-cm-warning" : "text-cm-error",
-              )}>
-                {confidencePct}%
-              </span>
-            </div>
-          )}
-          {mapping.reasoning && (
-            <p className="text-[10px] text-cm-text-secondary flex items-start gap-1.5">
-              <Sparkles className="h-3 w-3 text-cm-accent shrink-0 mt-0.5" />
-              {mapping.reasoning}
-            </p>
-          )}
-          {mapping.transformation && (
-            <div className="rounded-md border border-cm-border-subtle bg-cm-bg-surface p-2">
-              <p className="text-[9px] text-cm-text-tertiary font-medium uppercase tracking-wide mb-1">Transform</p>
-              <pre className="text-[10px] font-mono text-cm-text-primary whitespace-pre-wrap">{mapping.transformation}</pre>
-            </div>
+                {mapping.status === "rejected" && (
+                  <span className="inline-flex text-[9px] font-medium text-cm-error px-1.5 py-0.5 rounded-full bg-cm-error-subtle">
+                    rejected
+                  </span>
+                )}
+              </div>
+            );
+          })}
+
+          {primaryMapping && mappings.length === 0 && (
+            <p className="text-[10px] text-cm-text-tertiary italic">No mappings for this column.</p>
           )}
         </div>
       )}

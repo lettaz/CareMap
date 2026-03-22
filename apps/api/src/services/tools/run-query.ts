@@ -15,10 +15,14 @@ export const runQueryTool = tool({
     type: z.enum(["sql", "python"]).default("sql"),
     stage: z.enum(["source", "mapped", "harmonized"]).default("harmonized"),
     sourceFileIds: z.array(z.string().uuid()).optional().describe("For source stage: which specific files to load"),
+    nodeId: z
+      .string()
+      .optional()
+      .describe("When stage is 'harmonized', scope to entities from this harmonize node"),
   }),
-  execute: async ({ projectId, code, type, stage, sourceFileIds }) => {
+  execute: async ({ projectId, code, type, stage, sourceFileIds, nodeId }) => {
     try {
-      const result = await executeQuery({ projectId, code, type, stage, sourceFileIds });
+      const result = await executeQuery({ projectId, code, type, stage, sourceFileIds, nodeId });
 
       if (result.error) {
         const isRetryable = result.error.includes("ECONN") || result.error.includes("sandbox") || result.error.includes("port");

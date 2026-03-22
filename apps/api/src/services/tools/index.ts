@@ -5,6 +5,8 @@ import { executeCleaningTool } from "./execute-cleaning.js";
 import { proposeMappingsTool } from "./propose-mappings.js";
 import { confirmMappingsTool } from "./confirm-mappings.js";
 import { runHarmonizationTool } from "./run-harmonization.js";
+import { generateHarmonizationScriptTool } from "./generate-harmonization-script.js";
+import { executeHarmonizationScriptTool } from "./execute-harmonization-script.js";
 import { runQueryTool } from "./run-query.js";
 import { generateArtifactTool } from "./generate-artifact.js";
 import { explainLineageTool } from "./explain-lineage.js";
@@ -23,6 +25,8 @@ export const pipelineTools = {
   propose_mappings: proposeMappingsTool,
   confirm_mappings: confirmMappingsTool,
   run_harmonization: runHarmonizationTool,
+  generate_harmonization_script: generateHarmonizationScriptTool,
+  execute_harmonization_script: executeHarmonizationScriptTool,
 };
 
 export const analystTools = {

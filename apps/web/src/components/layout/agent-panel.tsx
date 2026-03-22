@@ -45,6 +45,7 @@ const DESTRUCTIVE_TOOLS = new Set([
   "run_harmonization",
   "confirm_mappings",
   "run_script",
+  "execute_harmonization_script",
 ]);
 
 const TOOL_LABELS: Record<string, string> = {
@@ -56,6 +57,8 @@ const TOOL_LABELS: Record<string, string> = {
   propose_mappings: "Proposing mappings",
   confirm_mappings: "Confirming mappings",
   run_harmonization: "Running harmonization",
+  generate_harmonization_script: "Generating harmonization script",
+  execute_harmonization_script: "Executing harmonization",
   run_query: "Querying data",
   run_script: "Running script",
   generate_artifact: "Generating artifact",
@@ -138,6 +141,8 @@ function extractInputSnippet(toolName: string, input: unknown): string | null {
         : null;
     case "generate_artifact":
       return (inp.userQuestion as string) ?? null;
+    case "execute_harmonization_script":
+      return (inp.script as string) ?? null;
     case "export_data":
       return inp.format ? `Exporting as ${inp.format}` : null;
     default:
@@ -160,7 +165,7 @@ export function AgentPanel() {
   const {
     sessions,
     activeSessionId,
-    loaded: sessionsLoaded,
+    loadedProjectId,
     loadSessions,
     createSession,
     switchSession,
@@ -169,8 +174,11 @@ export function AgentPanel() {
   } = useChatSessionStore();
 
   useEffect(() => {
-    if (projectId && !sessionsLoaded) loadSessions(projectId);
-  }, [projectId, sessionsLoaded, loadSessions]);
+    if (projectId && loadedProjectId !== projectId) {
+      sessionRestored.current = false;
+      loadSessions(projectId);
+    }
+  }, [projectId, loadedProjectId, loadSessions]);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
@@ -184,8 +192,11 @@ export function AgentPanel() {
   const [showSessionList, setShowSessionList] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const sessionRestored = useRef(false);
+
   const initialMessages = useMemo(
     () => activeSession?.messages ?? [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeSession?.id],
   );
 
@@ -207,6 +218,23 @@ export function AgentPanel() {
   });
 
   const { messages, sendMessage, status, error, stop, setMessages, addToolApprovalResponse } = chat;
+
+  const prevProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    if (projectId !== prevProjectIdRef.current) {
+      prevProjectIdRef.current = projectId;
+      setMessages([]);
+      sessionRestored.current = false;
+    }
+  }, [projectId, setMessages]);
+
+  useEffect(() => {
+    if (!loadedProjectId || loadedProjectId !== projectId || sessionRestored.current) return;
+    if (activeSession?.messages && activeSession.messages.length > 0) {
+      setMessages(activeSession.messages);
+    }
+    sessionRestored.current = true;
+  }, [loadedProjectId, projectId, activeSession?.id, activeSession?.messages, setMessages]);
 
   const contextualSuggestions = useMemo(
     () => deriveContextualSuggestions(messages),
@@ -232,6 +260,7 @@ export function AgentPanel() {
     switchSession(projectId, sessionId);
     const session = sessions.find((s) => s.id === sessionId);
     setMessages(session?.messages ?? []);
+    sessionRestored.current = true;
     editorRef.current?.clear();
     setShowSessionList(false);
   }, [projectId, switchSession, sessions, setMessages]);
@@ -694,12 +723,31 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
 
           if (isDestructive && toolPart.state === "approval-requested") {
             const approvalId = (toolPart as unknown as { approval?: { id: string } }).approval?.id ?? toolPart.toolCallId;
+            const approvalSnippet = extractInputSnippet(toolName, toolPart.input);
+            const approvalDescription = toolPart.input && typeof toolPart.input === "object"
+              ? (toolPart.input as Record<string, unknown>).description as string | undefined
+              : undefined;
+
             return (
-              <div key={i} className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
-                <p className="font-medium text-amber-800">
-                  Approve <strong>{label}</strong>?
-                </p>
-                <div className="flex items-center gap-2">
+              <div key={i} className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 overflow-hidden text-xs">
+                <div className="px-3 pt-3 pb-0">
+                  <p className="font-medium text-amber-800">
+                    Approve <strong>{label}</strong>?
+                  </p>
+                  {approvalDescription && (
+                    <p className="text-[11px] text-amber-700/80 mt-1">{approvalDescription}</p>
+                  )}
+                </div>
+
+                {approvalSnippet && (
+                  <div className="mx-3 rounded border border-amber-200/60 bg-white/70 max-h-[200px] overflow-auto">
+                    <pre className="text-[10px] leading-relaxed text-cm-text-secondary font-mono whitespace-pre-wrap break-all p-2.5">
+                      {approvalSnippet}
+                    </pre>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 px-3 pb-3">
                   <Button
                     variant="outline"
                     size="sm"

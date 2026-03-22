@@ -81,6 +81,7 @@ export interface FieldMapping {
   reasoning: string;
   status: MappingStatus;
   transformation?: string;
+  nodeId?: string;
 }
 
 export interface TargetColumn {
@@ -135,6 +136,7 @@ export interface QualityAlert {
   createdAt: string;
   timestamp?: string;
   affectedRecords?: AffectedRecord[];
+  nodeId?: string;
 }
 
 export interface PlanStep {

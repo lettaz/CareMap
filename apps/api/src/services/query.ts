@@ -9,6 +9,8 @@ export interface QueryRequest {
   type: "sql" | "python";
   stage: QueryStage;
   sourceFileIds?: string[];
+  /** When stage is harmonized, scope to entities from this harmonize node */
+  nodeId?: string;
 }
 
 export interface QueryResult {
@@ -37,12 +39,17 @@ async function resolveFiles(
   projectId: string,
   stage: QueryStage,
   sourceFileIds?: string[],
+  nodeId?: string,
 ): Promise<ResolvedFile[]> {
   if (stage === "harmonized") {
-    const { data: entities } = await supabase
+    let entityQuery = supabase
       .from("semantic_entities")
       .select("entity_name, parquet_path")
       .eq("project_id", projectId);
+    if (nodeId) {
+      entityQuery = entityQuery.eq("node_id", nodeId);
+    }
+    const { data: entities } = await entityQuery;
 
     return (entities ?? [])
       .filter((e) => e.parquet_path)
@@ -135,7 +142,12 @@ if '_result' in dir():
 export async function executeQuery(request: QueryRequest): Promise<QueryResult> {
   const start = Date.now();
   const userCode = request.code;
-  const resolved = await resolveFiles(request.projectId, request.stage, request.sourceFileIds);
+  const resolved = await resolveFiles(
+    request.projectId,
+    request.stage,
+    request.sourceFileIds,
+    request.nodeId,
+  );
 
   if (resolved.length === 0) {
     return {

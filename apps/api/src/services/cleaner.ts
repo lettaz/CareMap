@@ -25,6 +25,7 @@ export interface CleaningResult {
   cleanedStoragePath: string;
   steps: StepResult[];
   summary: Record<string, { before: string; after: string }>;
+  script: string;
 }
 
 const ROW_DROP_WARN_THRESHOLD = 0.05;
@@ -233,6 +234,7 @@ ${script}
       ...cleanResult,
       steps: cleanResult.steps ?? [],
       cleanedStoragePath: storageDest,
+      script,
     };
   } finally {
     await sandbox.kill().catch(() => {});

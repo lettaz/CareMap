@@ -1,9 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import {
   Download, Table2, BarChart3, CheckCircle2, XCircle, Pin, Check,
   Wand2, ChevronDown, ChevronRight, AlertTriangle,
   Zap, ExternalLink, CheckCheck, ArrowRight, Columns3,
+  FileCode2, Play, Database,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
@@ -12,7 +13,9 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CodeBlock } from "@/components/ai-elements/code-block";
+import {
+  CodeBlock, CodeBlockHeader, CodeBlockActions, CodeBlockCopyButton,
+} from "@/components/ai-elements/code-block";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
@@ -45,6 +48,10 @@ export function ToolResultRenderer({ toolName, output }: ToolResultRendererProps
     case "execute_cleaning":
     case "run_harmonization":
       return <PipelineResult data={data} toolName={toolName} />;
+    case "generate_harmonization_script":
+      return <HarmonizationScriptResult data={data} />;
+    case "execute_harmonization_script":
+      return <HarmonizationExecutionResult data={data} />;
     case "propose_target_schema":
       return <SchemaResult data={data} />;
     case "propose_mappings":
@@ -186,16 +193,25 @@ function PipelineResult({ data, toolName }: { data: Record<string, unknown>; too
   const rowsAfter = data.rowsAfter as number | undefined;
   const tablesHarmonized = data.tablesHarmonized as number | undefined;
   const steps = (data.steps as StepResult[] | undefined) ?? [];
+  const scriptCode = data.script as string | undefined;
   const hasWarnings = steps.some((s) => s.warning);
   const [showSteps, setShowSteps] = useState(hasWarnings);
+  const [showScript, setShowScript] = useState(false);
+
+  useEffect(() => {
+    if (isCleaning && success && projectId && targetNode) {
+      updateNodeData(projectId, targetNode.id, {
+        hasCleanedVersion: true,
+        status: "clean",
+        cleanedAt: Date.now(),
+      });
+    }
+  }, [isCleaning, success, projectId, targetNode?.id, updateNodeData]);
 
   const handleViewInPanel = useCallback(() => {
     if (!projectId || !targetNode) return;
-    if (isCleaning && success) {
-      updateNodeData(projectId, targetNode.id, { hasCleanedVersion: true });
-    }
     selectNode(projectId, targetNode.id);
-  }, [projectId, targetNode, isCleaning, success, updateNodeData, selectNode]);
+  }, [projectId, targetNode, selectNode]);
 
   return (
     <div className={cn(
@@ -219,15 +235,35 @@ function PipelineResult({ data, toolName }: { data: Record<string, unknown>; too
           {tablesHarmonized != null && (
             <span>{tablesHarmonized} table{tablesHarmonized !== 1 ? "s" : ""} harmonized</span>
           )}
-          {isCleaning && steps.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowSteps(!showSteps)}
-              className="ml-auto text-[10px] text-cm-accent hover:underline"
-            >
-              {showSteps ? "Hide steps" : `${steps.length} steps`}
-            </button>
-          )}
+          <div className="flex items-center gap-2 ml-auto">
+            {scriptCode && (
+              <button
+                type="button"
+                onClick={() => setShowScript(!showScript)}
+                className="text-[10px] text-cm-accent hover:underline flex items-center gap-1"
+              >
+                <FileCode2 className="h-2.5 w-2.5" />
+                {showScript ? "Hide script" : "View script"}
+              </button>
+            )}
+            {isCleaning && steps.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowSteps(!showSteps)}
+                className="text-[10px] text-cm-accent hover:underline"
+              >
+                {showSteps ? "Hide steps" : `${steps.length} steps`}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showScript && scriptCode && (
+        <div className="border-t border-green-100 max-h-[200px] overflow-auto bg-cm-bg-elevated/30">
+          <pre className="text-[10px] leading-relaxed text-cm-text-secondary font-mono whitespace-pre-wrap break-all p-3">
+            {scriptCode}
+          </pre>
         </div>
       )}
 
@@ -276,6 +312,225 @@ function PipelineResult({ data, toolName }: { data: Record<string, unknown>; too
   );
 }
 
+function HarmonizationScriptResult({ data }: { data: Record<string, unknown> }) {
+  const success = data.success as boolean | undefined;
+  const script = data.script as string | undefined;
+  const summary = data.summary as {
+    sourceFileCount?: number;
+    sourceFiles?: string[];
+    targetTableCount?: number;
+    targetTables?: string[];
+    totalMappings?: number;
+  } | undefined;
+
+  const [showScript, setShowScript] = useState(false);
+
+  if (success === false) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+        <XCircle className="h-4 w-4 shrink-0" />
+        {String(data.error ?? "Script generation failed")}
+      </div>
+    );
+  }
+
+  if (!script) return <GenericResult data={data} />;
+
+  return (
+    <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-cm-border-subtle bg-gradient-to-r from-violet-50 to-purple-50">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-violet-100">
+            <FileCode2 className="h-3.5 w-3.5 text-violet-700" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-cm-text-primary">Harmonization Script</p>
+            <p className="text-[10px] text-cm-text-tertiary">
+              {summary?.sourceFileCount ?? 0} source{(summary?.sourceFileCount ?? 0) !== 1 ? "s" : ""}
+              {" → "}
+              {summary?.targetTableCount ?? 0} table{(summary?.targetTableCount ?? 0) !== 1 ? "s" : ""}
+              {" · "}
+              {summary?.totalMappings ?? 0} mappings
+            </p>
+          </div>
+        </div>
+        <Badge
+          variant="outline"
+          className="text-[9px] px-1.5 py-0 h-4 border-violet-300 text-violet-700 bg-violet-50"
+        >
+          Generated
+        </Badge>
+      </div>
+
+      {summary?.targetTables && summary.targetTables.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-3 py-2 border-b border-cm-border-subtle bg-cm-bg-elevated/30">
+          {summary.targetTables.map((table) => (
+            <span
+              key={table}
+              className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700"
+            >
+              <Database className="h-2.5 w-2.5" />
+              {table}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="border-b border-cm-border-subtle">
+        <button
+          type="button"
+          onClick={() => setShowScript(!showScript)}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-cm-bg-elevated/50 transition-colors"
+        >
+          {showScript
+            ? <ChevronDown className="h-3 w-3 text-cm-text-tertiary shrink-0" />
+            : <ChevronRight className="h-3 w-3 text-cm-text-tertiary shrink-0" />}
+          <span className="text-[11px] font-medium text-cm-text-primary">
+            {showScript ? "Hide Script" : "View Script"}
+          </span>
+          <span className="text-[10px] text-cm-text-tertiary ml-1">
+            ({script.split("\n").length} lines)
+          </span>
+        </button>
+
+        {showScript && (
+          <div className="max-h-[400px] overflow-auto">
+            <CodeBlock code={script} language="python" showLineNumbers>
+              <CodeBlockHeader>
+                <span className="text-[10px] font-mono">harmonize.py</span>
+                <CodeBlockActions>
+                  <CodeBlockCopyButton className="h-6 w-6" />
+                </CodeBlockActions>
+              </CodeBlockHeader>
+            </CodeBlock>
+          </div>
+        )}
+      </div>
+
+      <div className="px-3 py-2 text-[11px] text-cm-text-secondary bg-cm-bg-elevated/40">
+        <span className="flex items-center gap-1.5">
+          <Play className="h-3 w-3 text-violet-600" />
+          Say <strong className="text-cm-text-primary">&quot;Approve and run&quot;</strong> to execute this script
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function HarmonizationExecutionResult({ data }: { data: Record<string, unknown> }) {
+  const { projectId } = useParams<{ projectId: string }>();
+  const selectNode = usePipelineStore((s) => s.selectNode);
+  const updateNodeData = usePipelineStore((s) => s.updateNodeData);
+  const pipelineNodes = usePipelineStore((s) =>
+    projectId ? s.pipelines[projectId]?.nodes ?? [] : [],
+  );
+
+  const success = data.success as boolean;
+  const tables = data.tables as Array<{ name: string; rows: number; columns: string[] }> | undefined;
+  const totalRecords = data.totalRecords as number | undefined;
+  const resultNodeId = data.nodeId as string | undefined;
+
+  const harmonizeNode = resultNodeId
+    ? pipelineNodes.find((n) => n.id === resultNodeId)
+    : pipelineNodes.find((n) => n.data.category === "harmonize");
+
+  const didSignal = useRef(false);
+  useEffect(() => {
+    if (didSignal.current || !success || !projectId || !harmonizeNode) return;
+    didSignal.current = true;
+    updateNodeData(projectId, harmonizeNode.id, {
+      status: "ready",
+      dataVersion: Date.now(),
+    });
+  }, [success, projectId, harmonizeNode, updateNodeData]);
+
+  const handleViewInPanel = useCallback(() => {
+    if (!projectId || !harmonizeNode) return;
+    selectNode(projectId, harmonizeNode.id);
+  }, [projectId, harmonizeNode, selectNode]);
+
+  if (!success) {
+    return (
+      <div className="rounded-lg border border-red-200 overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2.5 bg-red-50 text-xs text-red-700">
+          <XCircle className="h-4 w-4 shrink-0" />
+          <span className="font-medium">Harmonization failed</span>
+        </div>
+        <div className="px-3 py-2 text-[11px] text-red-600 bg-red-50/50 border-t border-red-100 font-mono whitespace-pre-wrap max-h-[200px] overflow-auto">
+          {String(data.error ?? "Unknown error")}
+        </div>
+        {data.suggestion && (
+          <div className="px-3 py-2 text-[11px] text-cm-text-secondary bg-cm-bg-elevated border-t border-cm-border-subtle">
+            {String(data.suggestion)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-green-200 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2.5 bg-green-50 border-b border-green-100">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+          <div>
+            <p className="text-xs font-semibold text-green-800">Harmonization Complete</p>
+            <p className="text-[10px] text-green-600">
+              {tables?.length ?? 0} table{(tables?.length ?? 0) !== 1 ? "s" : ""}
+              {totalRecords != null && ` · ${totalRecords.toLocaleString()} total records`}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {tables && tables.length > 0 && (
+        <div className="divide-y divide-green-100">
+          {tables.map((table) => (
+            <div key={table.name} className="flex items-center gap-3 px-3 py-2 bg-white">
+              <Database className="h-3.5 w-3.5 text-green-600 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-semibold text-cm-text-primary">{table.name}</p>
+                <p className="text-[10px] text-cm-text-tertiary">
+                  {table.rows.toLocaleString()} rows · {table.columns.length} columns
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1 max-w-[200px] justify-end">
+                {table.columns.slice(0, 4).map((col) => (
+                  <span
+                    key={col}
+                    className="rounded bg-cm-bg-elevated px-1.5 py-0.5 text-[9px] text-cm-text-tertiary font-mono"
+                  >
+                    {col}
+                  </span>
+                ))}
+                {table.columns.length > 4 && (
+                  <span className="text-[9px] text-cm-text-tertiary">
+                    +{table.columns.length - 4}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {harmonizeNode && projectId && (
+        <div className="flex items-center px-3 py-2 bg-cm-bg-elevated/40 border-t border-cm-border-subtle">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 text-[11px] ml-auto"
+            onClick={handleViewInPanel}
+          >
+            <ExternalLink className="h-3 w-3" />
+            View Harmonized Data
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SchemaResult({ data }: { data: Record<string, unknown> }) {
   const { projectId } = useParams<{ projectId: string }>();
   const selectNode = usePipelineStore((s) => s.selectNode);
@@ -287,6 +542,7 @@ function SchemaResult({ data }: { data: Record<string, unknown> }) {
 
   const schemaId = data.schemaId as string | undefined;
   const status = data.status as string | undefined;
+  const resultNodeId = data.nodeId as string | undefined;
   const tables = data.tables as Array<{
     name: string;
     description?: string;
@@ -300,13 +556,15 @@ function SchemaResult({ data }: { data: Record<string, unknown> }) {
   const [activated, setActivated] = useState(status === "active");
   const [expandedTable, setExpandedTable] = useState<string | null>(tables?.[0]?.name ?? null);
 
-  const transformNode = pipelineNodes.find((n) => n.data.category === "transform");
+  const transformNode = resultNodeId
+    ? pipelineNodes.find((n) => n.id === resultNodeId)
+    : pipelineNodes.find((n) => n.data.category === "transform");
 
   const handleActivate = useCallback(async () => {
     if (!projectId || !schemaId || activated) return;
     setActivating(true);
     try {
-      await activateSchema(projectId, schemaId);
+      await activateSchema(projectId, schemaId, resultNodeId);
       setActivated(true);
       toast.success("Schema activated");
 
@@ -484,35 +742,56 @@ function SchemaResult({ data }: { data: Record<string, unknown> }) {
 function MappingProposalResult({ data }: { data: Record<string, unknown> }) {
   const { projectId } = useParams<{ projectId: string }>();
   const selectNode = usePipelineStore((s) => s.selectNode);
+  const updateNodeData = usePipelineStore((s) => s.updateNodeData);
   const pipelineNodes = usePipelineStore((s) =>
     projectId ? s.pipelines[projectId]?.nodes ?? [] : [],
   );
 
   const success = data.success as boolean | undefined;
+  const resultNodeId = data.nodeId as string | undefined;
   const mappings = data.mappings as Array<{
     id: string;
+    sourceFileId?: string;
+    sourceFilename?: string;
     sourceColumn: string;
     targetTable: string;
     targetColumn: string;
     confidence: number;
     reasoning?: string;
     status: string;
+    nodeId?: string;
   }> | undefined;
-  const totalMappings = (data.totalMappings as number) ?? mappings?.length ?? 0;
   const autoAccepted = (data.autoAccepted as number) ?? 0;
 
   const [bulkAccepting, setBulkAccepting] = useState(false);
   const [bulkResult, setBulkResult] = useState<number | null>(null);
+  const [expandedTable, setExpandedTable] = useState<string | null>(null);
 
-  const transformNode = pipelineNodes.find((n) => n.data.category === "transform");
-  const pendingCount = mappings?.filter((m) => m.status === "pending").length ?? 0;
-  const acceptedCount = mappings?.filter((m) => m.status === "accepted").length ?? 0;
+  const transformNode = resultNodeId
+    ? pipelineNodes.find((n) => n.id === resultNodeId)
+    : pipelineNodes.find((n) => n.data.category === "transform");
+
+  const didSignal = useRef(false);
+  useEffect(() => {
+    if (didSignal.current || !success || !projectId || !transformNode) return;
+    didSignal.current = true;
+    updateNodeData(projectId, transformNode.id, { dataVersion: Date.now() });
+  }, [success, projectId, transformNode, updateNodeData]);
+
+  const uniqueTargetColumns = (data.uniqueTargetColumns as number)
+    ?? new Set(mappings?.map((m) => `${m.targetTable}.${m.targetColumn}`)).size;
+  const pendingColumns = new Set(
+    mappings?.filter((m) => m.status === "pending").map((m) => `${m.targetTable}.${m.targetColumn}`),
+  ).size;
+  const acceptedColumns = new Set(
+    mappings?.filter((m) => m.status === "accepted").map((m) => `${m.targetTable}.${m.targetColumn}`),
+  ).size;
 
   const handleBulkAccept = useCallback(async () => {
     if (!projectId || bulkAccepting) return;
     setBulkAccepting(true);
     try {
-      const result = await bulkAcceptMappings(projectId);
+      const result = await bulkAcceptMappings(projectId, 0.85, resultNodeId);
       setBulkResult(result.accepted);
       toast.success(`Accepted ${result.accepted} mapping${result.accepted !== 1 ? "s" : ""}`);
     } catch (err) {
@@ -545,6 +824,9 @@ function MappingProposalResult({ data }: { data: Record<string, unknown> }) {
     byTable.set(m.targetTable, existing);
   }
 
+  const sourceFileIds = new Set(mappings.map((m) => m.sourceFileId).filter(Boolean));
+  const hasMultipleSources = sourceFileIds.size > 1;
+
   return (
     <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-cm-border-subtle bg-gradient-to-r from-emerald-50 to-teal-50">
@@ -555,78 +837,119 @@ function MappingProposalResult({ data }: { data: Record<string, unknown> }) {
           <div>
             <p className="text-xs font-semibold text-cm-text-primary">Field Mappings</p>
             <p className="text-[10px] text-cm-text-tertiary">
-              {totalMappings} mapping{totalMappings !== 1 ? "s" : ""}
+              {uniqueTargetColumns} target column{uniqueTargetColumns !== 1 ? "s" : ""} covered
+              {hasMultipleSources && ` · ${sourceFileIds.size} sources`}
               {autoAccepted > 0 && ` · ${autoAccepted} auto-accepted`}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          {acceptedCount > 0 && (
+          {acceptedColumns > 0 && (
             <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-green-300 text-green-700 bg-green-50">
-              {acceptedCount} accepted
+              {acceptedColumns} accepted
             </Badge>
           )}
-          {pendingCount > 0 && (
+          {pendingColumns > 0 && (
             <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-300 text-amber-700 bg-amber-50">
-              {pendingCount} pending
+              {pendingColumns} pending
             </Badge>
           )}
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-[11px]">
-          <thead>
-            <tr className="bg-cm-bg-elevated border-b border-cm-border-subtle">
-              <th className="px-2.5 py-1.5 text-left font-medium text-cm-text-tertiary">Source</th>
-              <th className="px-1 py-1.5 text-center text-cm-text-tertiary">→</th>
-              <th className="px-2.5 py-1.5 text-left font-medium text-cm-text-tertiary">Target</th>
-              <th className="px-2.5 py-1.5 text-right font-medium text-cm-text-tertiary">Conf.</th>
-              <th className="px-2.5 py-1.5 text-center font-medium text-cm-text-tertiary">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...byTable.entries()].map(([table, tableMappings]) => (
-              tableMappings.map((m, i) => (
-                <tr key={m.id} className="border-b border-cm-border-subtle last:border-b-0">
-                  <td className="px-2.5 py-1.5 font-mono text-cm-text-primary whitespace-nowrap">
-                    {m.sourceColumn}
-                  </td>
-                  <td className="px-1 py-1.5 text-center text-cm-text-tertiary">→</td>
-                  <td className="px-2.5 py-1.5 whitespace-nowrap">
-                    <span className="font-mono text-cm-text-primary">{m.targetColumn}</span>
-                    {i === 0 && (
-                      <span className="ml-1.5 rounded bg-cm-bg-elevated px-1 py-0.5 text-[9px] text-cm-text-tertiary">
-                        {table}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-2.5 py-1.5 text-right tabular-nums">
-                    <span className={cn(
-                      "font-medium",
-                      m.confidence >= 0.85 ? "text-green-600" : m.confidence >= 0.5 ? "text-amber-600" : "text-red-500",
-                    )}>
-                      {Math.round(m.confidence * 100)}%
-                    </span>
-                  </td>
-                  <td className="px-2.5 py-1.5 text-center">
-                    {m.status === "accepted" ? (
-                      <CheckCircle2 className="h-3 w-3 text-green-500 mx-auto" />
-                    ) : m.status === "rejected" ? (
-                      <XCircle className="h-3 w-3 text-red-400 mx-auto" />
-                    ) : (
-                      <span className="inline-block h-2 w-2 rounded-full bg-amber-400 mx-auto" />
-                    )}
-                  </td>
-                </tr>
-              ))
-            ))}
-          </tbody>
-        </table>
+      <div className="divide-y divide-cm-border-subtle">
+        {[...byTable.entries()].map(([table, tableMappings]) => {
+          const isExpanded = expandedTable === table;
+          const tableAccepted = new Set(
+            tableMappings.filter((m) => m.status === "accepted").map((m) => m.targetColumn),
+          ).size;
+          const tablePending = tableMappings.filter((m) => m.status === "pending").length;
+          const uniqueCols = new Set(tableMappings.map((m) => m.targetColumn)).size;
+
+          return (
+            <div key={table}>
+              <button
+                type="button"
+                onClick={() => setExpandedTable(isExpanded ? null : table)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-cm-bg-elevated/50 transition-colors"
+              >
+                {isExpanded
+                  ? <ChevronDown className="h-3 w-3 text-cm-text-tertiary shrink-0" />
+                  : <ChevronRight className="h-3 w-3 text-cm-text-tertiary shrink-0" />}
+                <span className="text-[11px] font-semibold text-cm-text-primary">{table}</span>
+                <span className="text-[10px] text-cm-text-tertiary">
+                  {uniqueCols} column{uniqueCols !== 1 ? "s" : ""}
+                </span>
+                <div className="ml-auto flex items-center gap-1.5">
+                  {tableAccepted > 0 && (
+                    <span className="text-[9px] font-medium text-green-600">{tableAccepted} mapped</span>
+                  )}
+                  {tablePending > 0 && (
+                    <span className="text-[9px] font-medium text-amber-600">{tablePending} review</span>
+                  )}
+                </div>
+              </button>
+
+              {isExpanded && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="bg-cm-bg-elevated border-b border-cm-border-subtle">
+                        <th className="px-2.5 py-1.5 text-left font-medium text-cm-text-tertiary">Source</th>
+                        <th className="px-1 py-1.5 text-center text-cm-text-tertiary">→</th>
+                        <th className="px-2.5 py-1.5 text-left font-medium text-cm-text-tertiary">Target</th>
+                        <th className="px-2.5 py-1.5 text-right font-medium text-cm-text-tertiary">Conf.</th>
+                        <th className="px-2.5 py-1.5 text-center font-medium text-cm-text-tertiary">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableMappings.map((m) => (
+                        <tr key={m.id} className="border-b border-cm-border-subtle last:border-b-0">
+                          <td className="px-2.5 py-1.5 whitespace-nowrap">
+                            {m.sourceFilename ? (
+                              <span className="flex items-center gap-1">
+                                <span className="text-[9px] font-medium text-cm-accent">{m.sourceFilename}</span>
+                                <span className="text-cm-text-tertiary">›</span>
+                                <span className="font-mono text-cm-text-primary">{m.sourceColumn}</span>
+                              </span>
+                            ) : (
+                              <span className="font-mono text-cm-text-primary">{m.sourceColumn}</span>
+                            )}
+                          </td>
+                          <td className="px-1 py-1.5 text-center text-cm-text-tertiary">→</td>
+                          <td className="px-2.5 py-1.5 font-mono text-cm-text-primary whitespace-nowrap">
+                            {m.targetColumn}
+                          </td>
+                          <td className="px-2.5 py-1.5 text-right tabular-nums">
+                            <span className={cn(
+                              "font-medium",
+                              m.confidence >= 0.85 ? "text-green-600" : m.confidence >= 0.5 ? "text-amber-600" : "text-red-500",
+                            )}>
+                              {Math.round(m.confidence * 100)}%
+                            </span>
+                          </td>
+                          <td className="px-2.5 py-1.5 text-center">
+                            {m.status === "accepted" ? (
+                              <CheckCircle2 className="h-3 w-3 text-green-500 mx-auto" />
+                            ) : m.status === "rejected" ? (
+                              <XCircle className="h-3 w-3 text-red-400 mx-auto" />
+                            ) : (
+                              <span className="inline-block h-2 w-2 rounded-full bg-amber-400 mx-auto" />
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div className="flex items-center gap-2 px-3 py-2.5 border-t border-cm-border-subtle bg-cm-bg-elevated/40">
-        {pendingCount > 0 && bulkResult === null && (
+        {pendingColumns > 0 && bulkResult === null && (
           <Button
             size="sm"
             className="h-7 gap-1.5 text-[11px]"

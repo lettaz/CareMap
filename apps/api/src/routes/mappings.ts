@@ -6,13 +6,13 @@ import { ValidationError, NotFoundError } from "../lib/errors.js";
 import { parsePagination, paginationRange, buildPaginatedResponse } from "../lib/pagination.js";
 
 export const mappingRoutes: FastifyPluginAsync = async (app) => {
-  app.get<{ Querystring: { projectId: string; page?: string; pageSize?: string } }>("/", async (request) => {
-    const { projectId } = request.query;
+  app.get<{ Querystring: { projectId: string; nodeId?: string; page?: string; pageSize?: string } }>("/", async (request) => {
+    const { projectId, nodeId } = request.query;
     if (!projectId) throw new ValidationError("projectId is required");
 
     const pagination = parsePagination(request.query);
     const range = paginationRange(pagination);
-    const { data, total } = await getMappingsByProject(projectId, range);
+    const { data, total } = await getMappingsByProject(projectId, range, nodeId);
     return buildPaginatedResponse(data, total, pagination);
   });
 
@@ -72,14 +72,14 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
     return updateMappingStatus(id, updates);
   });
 
-  app.post<{ Querystring: { projectId: string } }>("/bulk-accept", async (request) => {
-    const { projectId } = request.query;
+  app.post<{ Querystring: { projectId: string; nodeId?: string } }>("/bulk-accept", async (request) => {
+    const { projectId, nodeId } = request.query;
     if (!projectId) throw new ValidationError("projectId is required");
 
     const body = request.body as { threshold?: number };
     const threshold = body.threshold ?? 0.85;
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("field_mappings")
       .update({
         status: "accepted",
@@ -88,8 +88,11 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
       })
       .eq("project_id", projectId)
       .eq("status", "pending")
-      .gte("confidence", threshold)
-      .select();
+      .gte("confidence", threshold);
+
+    if (nodeId) query = query.eq("node_id", nodeId);
+
+    const { data, error } = await query.select();
 
     if (error) throw new Error(`Bulk accept failed: ${error.message}`);
     return { accepted: data?.length ?? 0 };
