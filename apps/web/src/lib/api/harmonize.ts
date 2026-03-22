@@ -12,6 +12,7 @@ export interface TablePreviewDTO {
   rows: Record<string, unknown>[];
   totalRows: number;
   previewRows: number;
+  offset: number;
 }
 
 export function fetchHarmonizedTables(
@@ -26,8 +27,9 @@ export function fetchTablePreview(
   projectId: string,
   tableName: string,
   limit = 50,
+  offset = 0,
 ): Promise<TablePreviewDTO> {
   return apiFetch<TablePreviewDTO>(
-    `/api/harmonize/tables/${tableName}/preview?projectId=${projectId}&limit=${limit}`,
+    `/api/harmonize/tables/${tableName}/preview?projectId=${projectId}&limit=${limit}&offset=${offset}`,
   );
 }

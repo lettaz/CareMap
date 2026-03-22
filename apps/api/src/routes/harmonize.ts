@@ -54,14 +54,15 @@ export const harmonizeRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  app.get<{ Params: { tableName: string }; Querystring: { projectId: string; limit?: string } }>(
+  app.get<{ Params: { tableName: string }; Querystring: { projectId: string; limit?: string; offset?: string } }>(
     "/tables/:tableName/preview",
     async (request) => {
-      const { projectId, limit: limitStr } = request.query;
+      const { projectId, limit: limitStr, offset: offsetStr } = request.query;
       const { tableName } = request.params;
       if (!projectId) throw new ValidationError("projectId is required");
 
       const limit = Math.min(Math.max(parseInt(limitStr ?? "50", 10) || 50, 1), 500);
+      const offset = Math.max(parseInt(offsetStr ?? "0", 10) || 0, 0);
       const storagePath = harmonizedTablePath(projectId, tableName);
 
       let buffer: Buffer;
@@ -79,9 +80,9 @@ export const harmonizeRoutes: FastifyPluginAsync = async (app) => {
 
       const columns = parsed.meta.fields ?? [];
       const totalRows = parsed.data.length;
-      const rows = parsed.data.slice(0, limit);
+      const rows = parsed.data.slice(offset, offset + limit);
 
-      return { tableName, columns, rows, totalRows, previewRows: rows.length };
+      return { tableName, columns, rows, totalRows, previewRows: rows.length, offset };
     },
   );
 };

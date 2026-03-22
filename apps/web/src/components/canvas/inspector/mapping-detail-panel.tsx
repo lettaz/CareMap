@@ -322,7 +322,7 @@ export function MappingDetailPanel({ nodeId }: MappingDetailPanelProps) {
             className="text-sm font-medium text-cm-text-primary"
           />
           <p className="text-xs text-cm-text-tertiary mt-0.5">
-            {schemaTables.length} target tables · {mappings.length} columns · {pending} need attention
+            {schemaTables.length} target tables · {schemaTables.reduce((sum, t) => sum + t.columns.length, 0)} columns · {pending} need attention
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">

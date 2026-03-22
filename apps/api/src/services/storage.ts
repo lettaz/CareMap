@@ -26,13 +26,25 @@ export async function uploadFile(
   path: string,
   buffer: Buffer,
   contentType: string,
+  maxRetries = 3,
 ): Promise<string> {
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, buffer, { contentType, upsert: true });
+  let lastError: string | undefined;
 
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
-  return path;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, buffer, { contentType, upsert: true });
+
+    if (!error) return path;
+
+    lastError = error.message;
+    const isTransient = /fetch failed|ECONNRESET|socket hang up|timeout|5\d{2}/i.test(lastError);
+    if (!isTransient || attempt === maxRetries) break;
+
+    await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+  }
+
+  throw new Error(`Storage upload failed: ${lastError}`);
 }
 
 export async function downloadFile(path: string): Promise<Buffer> {

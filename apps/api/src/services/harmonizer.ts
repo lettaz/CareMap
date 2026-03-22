@@ -100,6 +100,7 @@ export function buildHarmonizationScript(
       lines.push(`if _cols:`);
       lines.push(`    _subset = ${srcVar}[_cols].copy()`);
       lines.push(`    _subset = _subset.rename(columns={${renameMap}})`);
+      lines.push(`    _subset = _subset.loc[:, ~_subset.columns.duplicated(keep="first")]`);
 
       for (const m of deduped) {
         if (m.transformation) {
