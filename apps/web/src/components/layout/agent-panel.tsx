@@ -145,8 +145,11 @@ function extractInputSnippet(toolName: string, input: unknown): string | null {
       return (inp.script as string) ?? null;
     case "export_data":
       return inp.format ? `Exporting as ${inp.format}` : null;
+    case "run_harmonization":
+    case "confirm_mappings":
+      return (inp.description as string) ?? (inp.code as string) ?? (inp.script as string) ?? null;
     default:
-      return null;
+      return (inp.code as string) ?? (inp.script as string) ?? null;
   }
 }
 
@@ -723,9 +726,10 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
 
           if (isDestructive && toolPart.state === "approval-requested") {
             const approvalId = (toolPart as unknown as { approval?: { id: string } }).approval?.id ?? toolPart.toolCallId;
-            const approvalSnippet = extractInputSnippet(toolName, toolPart.input);
-            const approvalDescription = toolPart.input && typeof toolPart.input === "object"
-              ? (toolPart.input as Record<string, unknown>).description as string | undefined
+            const toolInput = toolPart.input ?? (toolPart as unknown as { args?: unknown }).args;
+            const approvalSnippet = extractInputSnippet(toolName, toolInput);
+            const approvalDescription = toolInput && typeof toolInput === "object"
+              ? (toolInput as Record<string, unknown>).description as string | undefined
               : undefined;
 
             return (

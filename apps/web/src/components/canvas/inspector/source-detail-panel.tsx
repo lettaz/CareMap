@@ -55,11 +55,12 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
 
   const nodeStatus = node?.data.status as string | undefined;
   const hasExistingData = !!node?.data.sourceFileId && (nodeStatus === "ready" || nodeStatus === "clean");
-  const hasCleanedVersion = !!(node?.data.hasCleanedVersion) || nodeStatus === "clean";
   const sourceFileId = node?.data.sourceFileId as string | undefined;
   const cleanedAt = node?.data.cleanedAt as number | undefined;
 
   const [phase, setPhase] = useState<PanelPhase>(hasExistingData ? "preview" : "upload");
+  const [backendCleanStatus, setBackendCleanStatus] = useState(false);
+  const hasCleanedVersion = !!(node?.data.hasCleanedVersion) || nodeStatus === "clean" || backendCleanStatus;
   const [uploadedFile, setUploadedFile] = useState<{ name: string; size: string } | null>(null);
   const [steps, setSteps] = useState<AnalysisStep[]>([]);
   const [profile, setProfile] = useState<DetailedProfileDTO | null>(null);
@@ -105,6 +106,12 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
     fetchDetailedProfile(sourceFileId)
       .then((p) => {
         setProfile(p);
+        if (p.status === "clean") {
+          setBackendCleanStatus(true);
+          if (projectId) {
+            updateNodeData(projectId, nodeId, { hasCleanedVersion: true, status: "clean" });
+          }
+        }
         if (projectId) {
           const issueCount = p.columns.filter((c) => {
             const stats = c.nativeStats as Record<string, unknown>;

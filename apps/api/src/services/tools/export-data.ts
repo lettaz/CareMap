@@ -95,9 +95,18 @@ export const exportDataTool = tool({
     format: z.enum(["csv", "json", "xlsx", "parquet"]).default("csv")
       .describe("Output format: csv, json, xlsx (Excel), or parquet"),
     columns: z.array(z.string()).describe("Column headers in order"),
-    rows: z.array(z.record(z.unknown())).describe("Array of row objects matching the columns"),
+    rows: z.array(z.union([z.record(z.unknown()), z.array(z.unknown())]))
+      .describe("Array of row objects or arrays matching the columns"),
   }),
-  execute: async ({ projectId, filename, format, columns, rows }) => {
+  execute: async ({ projectId, filename, format, columns, rows: rawRows }) => {
+    const rows: Record<string, unknown>[] = rawRows.map((row) => {
+      if (Array.isArray(row)) {
+        const obj: Record<string, unknown> = {};
+        columns.forEach((col, i) => { obj[col] = row[i] ?? null; });
+        return obj;
+      }
+      return row as Record<string, unknown>;
+    });
     try {
       if (!rows.length) {
         return {
