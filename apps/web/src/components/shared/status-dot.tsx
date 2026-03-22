@@ -7,6 +7,7 @@ const STATUS_CLASSES: Record<NodeStatus, string> = {
   warning: "bg-amber-500",
   error: "bg-red-500",
   idle: "bg-slate-300",
+  clean: "bg-blue-500",
 };
 
 export function StatusDot({ status }: { status: NodeStatus }) {

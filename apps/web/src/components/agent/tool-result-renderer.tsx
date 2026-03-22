@@ -459,9 +459,9 @@ function HarmonizationExecutionResult({ data }: { data: Record<string, unknown> 
         <div className="px-3 py-2 text-[11px] text-red-600 bg-red-50/50 border-t border-red-100 font-mono whitespace-pre-wrap max-h-[200px] overflow-auto">
           {String(data.error ?? "Unknown error")}
         </div>
-        {data.suggestion && (
+        {typeof data.suggestion === "string" && (
           <div className="px-3 py-2 text-[11px] text-cm-text-secondary bg-cm-bg-elevated border-t border-cm-border-subtle">
-            {String(data.suggestion)}
+            {data.suggestion}
           </div>
         )}
       </div>

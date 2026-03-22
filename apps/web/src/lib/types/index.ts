@@ -1,7 +1,7 @@
 import type { Node, Edge } from "@xyflow/react";
 
 export type NodeCategory = "source" | "transform" | "harmonize" | "quality" | "sink";
-export type NodeStatus = "ready" | "running" | "warning" | "error" | "idle";
+export type NodeStatus = "ready" | "running" | "warning" | "error" | "idle" | "clean";
 export type FileType = "csv" | "xlsx" | "pdf" | "txt";
 export type MappingStatus = "pending" | "accepted" | "rejected";
 export type TargetColumnStatus = "mapped" | "partial" | "gap" | "derived";
