@@ -1088,6 +1088,15 @@ function ArtifactResult({ data }: { data: Record<string, unknown> }) {
   const pinWidget = useDashboardStore((s) => s.pinWidget);
   const [pinned, setPinned] = useState(false);
 
+  if (data.success === false || data.type === "error") {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+        <XCircle className="h-4 w-4 shrink-0" />
+        <span>Chart generation skipped — the AI will retry with query data.</span>
+      </div>
+    );
+  }
+
   const artifactType = data.artifactType as string | undefined;
   if (artifactType !== "chart") return <GenericResult data={data} />;
 
