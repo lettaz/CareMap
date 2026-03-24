@@ -41,13 +41,6 @@ import { CareMapMark } from "@/components/shared/caremap-logo";
 import { buildMentionMarkup } from "@/lib/mention-markup";
 import { cn } from "@/lib/utils";
 
-const DESTRUCTIVE_TOOLS = new Set([
-  "run_harmonization",
-  "confirm_mappings",
-  "run_script",
-  "execute_harmonization_script",
-]);
-
 const TOOL_LABELS: Record<string, string> = {
   parse_file: "Parsing file",
   profile_columns: "Profiling columns",
@@ -120,36 +113,73 @@ const MODEL_OPTIONS = [
   { value: "claude-sonnet", label: "Claude Sonnet" },
 ] as const;
 
-function extractInputSnippet(toolName: string, input: unknown): string | null {
-  if (!input || typeof input !== "object") return null;
+function extractInputSnippet(toolName: string, input: unknown): { label: string | null; code: string | null } {
+  if (!input || typeof input !== "object") return { label: null, code: null };
   const inp = input as Record<string, unknown>;
 
   switch (toolName) {
     case "run_query":
-      return (inp.sql as string) ?? (inp.query as string) ?? null;
+      return {
+        label: `${inp.type ?? "sql"} query (stage: ${inp.stage ?? "harmonized"})`,
+        code: (inp.code as string) ?? (inp.sql as string) ?? (inp.query as string) ?? null,
+      };
     case "run_script":
-      return (inp.code as string) ?? (inp.script as string) ?? null;
+      return {
+        label: (inp.description as string) ?? "Python script",
+        code: (inp.code as string) ?? (inp.script as string) ?? null,
+      };
     case "execute_cleaning":
-      return inp.actions ? `Cleaning ${(inp.actions as unknown[]).length} action(s)` : null;
+      return {
+        label: inp.actions ? `Cleaning ${(inp.actions as unknown[]).length} action(s)` : "Cleaning",
+        code: inp.actions ? JSON.stringify(inp.actions, null, 2) : null,
+      };
     case "propose_target_schema":
-      return inp.sourceFileIds
-        ? `Analyzing ${(inp.sourceFileIds as string[]).length} source file(s)`
-        : null;
+      return {
+        label: inp.sourceFileIds
+          ? `Analyzing ${(inp.sourceFileIds as string[]).length} source file(s)`
+          : "Proposing schema",
+        code: null,
+      };
     case "propose_mappings":
-      return inp.sourceFileIds
-        ? `Mapping ${(inp.sourceFileIds as string[]).length} source(s) to schema`
-        : null;
+      return {
+        label: inp.sourceFileIds
+          ? `Mapping ${(inp.sourceFileIds as string[]).length} source(s) to schema`
+          : "Proposing mappings",
+        code: null,
+      };
     case "generate_artifact":
-      return (inp.userQuestion as string) ?? null;
+      return {
+        label: (inp.userQuestion as string) ?? "Generating chart",
+        code: null,
+      };
     case "execute_harmonization_script":
-      return (inp.script as string) ?? null;
+      return {
+        label: (inp.description as string) ?? "Harmonization script",
+        code: (inp.script as string) ?? null,
+      };
     case "export_data":
-      return inp.format ? `Exporting as ${inp.format}` : null;
+      return {
+        label: inp.format ? `Exporting as ${inp.format}` : "Exporting data",
+        code: null,
+      };
     case "run_harmonization":
+      return {
+        label: inp.mappingIds
+          ? `Harmonizing ${(inp.mappingIds as string[]).length} mapping(s)`
+          : "Running harmonization",
+        code: null,
+      };
     case "confirm_mappings":
-      return (inp.description as string) ?? (inp.code as string) ?? (inp.script as string) ?? null;
-    default:
-      return (inp.code as string) ?? (inp.script as string) ?? null;
+      return {
+        label: inp.approvals
+          ? `Confirming ${(inp.approvals as unknown[]).length} mapping(s)`
+          : "Confirming mappings",
+        code: inp.approvals ? JSON.stringify(inp.approvals, null, 2) : null,
+      };
+    default: {
+      const codeStr = (inp.code as string) ?? (inp.script as string) ?? null;
+      return { label: (inp.description as string) ?? null, code: codeStr };
+    }
   }
 }
 
@@ -718,19 +748,15 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
             input?: unknown;
             output?: unknown;
             errorText?: string;
+            approval?: { id: string };
           };
 
           const toolName = toolPart.toolName ?? toolPart.type.replace("tool-", "");
           const label = TOOL_LABELS[toolName] ?? toolName;
-          const isDestructive = DESTRUCTIVE_TOOLS.has(toolName);
+          const snippet = extractInputSnippet(toolName, toolPart.input);
 
-          if (isDestructive && toolPart.state === "approval-requested") {
-            const approvalId = (toolPart as unknown as { approval?: { id: string } }).approval?.id ?? toolPart.toolCallId;
-            const toolInput = toolPart.input ?? (toolPart as unknown as { args?: unknown }).args;
-            const approvalSnippet = extractInputSnippet(toolName, toolInput);
-            const approvalDescription = toolInput && typeof toolInput === "object"
-              ? (toolInput as Record<string, unknown>).description as string | undefined
-              : undefined;
+          if (toolPart.state === "approval-requested") {
+            const approvalId = toolPart.approval?.id ?? toolPart.toolCallId;
 
             return (
               <div key={i} className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 overflow-hidden text-xs">
@@ -738,15 +764,15 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
                   <p className="font-medium text-amber-800">
                     Approve <strong>{label}</strong>?
                   </p>
-                  {approvalDescription && (
-                    <p className="text-[11px] text-amber-700/80 mt-1">{approvalDescription}</p>
+                  {snippet.label && (
+                    <p className="text-[11px] text-amber-700/80 mt-1">{snippet.label}</p>
                   )}
                 </div>
 
-                {approvalSnippet && (
+                {snippet.code && (
                   <div className="mx-3 rounded border border-amber-200/60 bg-white/70 max-h-[200px] overflow-auto">
                     <pre className="text-[10px] leading-relaxed text-cm-text-secondary font-mono whitespace-pre-wrap break-all p-2.5">
-                      {approvalSnippet}
+                      {snippet.code}
                     </pre>
                   </div>
                 )}
@@ -800,12 +826,12 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
             );
           }
 
-          const isRunning = toolPart.state === "running" || toolPart.state === "streaming" || toolPart.state === "partial-call";
+          const isRunning = toolPart.state === "input-streaming"
+            || toolPart.state === "input-available"
+            || toolPart.state === "approval-responded";
           const isError = toolPart.state === "output-error";
           const statusColor = isError ? "text-red-600" : isRunning ? "text-cm-accent" : "text-cm-text-tertiary";
           const dotClass = isError ? "bg-red-500" : isRunning ? "bg-cm-accent animate-pulse" : "bg-slate-300";
-
-          const inputSnippet = extractInputSnippet(toolName, toolPart.input);
 
           return (
             <div key={i} className="rounded-lg border border-cm-border-primary overflow-hidden">
@@ -814,11 +840,16 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
                 <span className={cn("font-medium", statusColor)}>{label}</span>
                 {isRunning && <Loader2 className="h-3 w-3 animate-spin text-cm-accent ml-auto shrink-0" />}
               </div>
-              {inputSnippet && (
+              {snippet.code && (
                 <div className="border-t border-cm-border-subtle bg-cm-bg-elevated/50 px-2.5 py-2 max-h-28 overflow-auto">
                   <pre className="text-[10px] leading-relaxed text-cm-text-secondary font-mono whitespace-pre-wrap break-all">
-                    {inputSnippet}
+                    {snippet.code}
                   </pre>
+                </div>
+              )}
+              {!snippet.code && snippet.label && (
+                <div className="border-t border-cm-border-subtle bg-cm-bg-elevated/50 px-2.5 py-1.5">
+                  <span className="text-[10px] text-cm-text-tertiary">{snippet.label}</span>
                 </div>
               )}
               {isError && toolPart.errorText && (
