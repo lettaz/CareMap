@@ -206,13 +206,6 @@ export function AgentPanel() {
     updateMessages,
   } = useChatSessionStore();
 
-  useEffect(() => {
-    if (projectId && loadedProjectId !== projectId) {
-      sessionRestored.current = false;
-      loadSessions(projectId);
-    }
-  }, [projectId, loadedProjectId, loadSessions]);
-
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
     [sessions, activeSessionId],
@@ -226,11 +219,12 @@ export function AgentPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sessionRestored = useRef(false);
+  const chatProjectRef = useRef<string | null>(null);
 
   const initialMessages = useMemo(
-    () => activeSession?.messages ?? [],
+    () => (loadedProjectId === projectId ? activeSession?.messages ?? [] : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeSession?.id],
+    [activeSession?.id, loadedProjectId, projectId],
   );
 
   const transport = useMemo(
@@ -252,14 +246,17 @@ export function AgentPanel() {
 
   const { messages, sendMessage, status, error, stop, setMessages, addToolApprovalResponse } = chat;
 
-  const prevProjectIdRef = useRef(projectId);
   useEffect(() => {
-    if (projectId !== prevProjectIdRef.current) {
-      prevProjectIdRef.current = projectId;
+    if (!projectId) return;
+    if (chatProjectRef.current !== projectId) {
+      chatProjectRef.current = projectId;
       setMessages([]);
       sessionRestored.current = false;
     }
-  }, [projectId, setMessages]);
+    if (loadedProjectId !== projectId) {
+      loadSessions(projectId);
+    }
+  }, [projectId, loadedProjectId, loadSessions, setMessages]);
 
   useEffect(() => {
     if (!loadedProjectId || loadedProjectId !== projectId || sessionRestored.current) return;

@@ -123,6 +123,8 @@ export const useChatSessionStore = create<ChatSessionState>()((set, get) => ({
   loadedProjectId: null,
 
   loadSessions: (projectId) => {
+    set({ sessions: [], activeSessionId: null, loadedProjectId: null });
+
     const index = loadIndex(projectId);
     const sessions: ChatSession[] = [];
 
