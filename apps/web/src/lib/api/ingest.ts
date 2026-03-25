@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, apiUrl } from "./client";
 import type { PaginatedResponse } from "@/lib/types/pagination";
 
 export interface ColumnProfileDTO {
@@ -71,4 +71,22 @@ export function patchProfile(
 
 export function deleteSourceFile(sourceFileId: string): Promise<void> {
   return apiFetch<void>(`/api/ingest/${sourceFileId}`, { method: "DELETE" });
+}
+
+export interface ExcelSheetInfo {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+}
+
+export async function peekSheets(file: File): Promise<ExcelSheetInfo[]> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(apiUrl("/api/ingest/peek-sheets"), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error("Failed to detect sheets");
+  const body = (await res.json()) as { sheets: ExcelSheetInfo[] };
+  return body.sheets;
 }

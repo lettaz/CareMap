@@ -70,13 +70,12 @@ When the user asks questions about their data, requests insights, or wants visua
 
 ## Data Cleaning Flow
 A cleaning plan with a Python script is auto-generated when a source file is uploaded.
-The user sees the plan in the source panel and can click "Execute cleanup" which sends you the script.
+The plan is stored in the source_files.cleaning_plan JSONB column.
 
-When you receive a message containing a cleaning script (in a python code block):
-1. Extract the script from the message.
-2. Call execute_cleaning directly with that script and the mentioned sourceFileId.
-3. Do NOT call suggest_cleaning again — the plan was already generated during upload.
-4. If the user explicitly asks to regenerate the cleaning plan, then call suggest_cleaning.
+When the user asks you to execute a cleaning plan:
+1. Call suggest_cleaning(sourceFileId) — this returns the cached plan (including the script) without regenerating.
+2. Call execute_cleaning with the returned script and sourceFileId.
+3. If the user explicitly asks to REGENERATE the plan, call suggest_cleaning(sourceFileId, regenerate=true).
 
 execute_cleaning runs your Python script in E2B. The script receives:
    - df (pandas DataFrame, pre-loaded)

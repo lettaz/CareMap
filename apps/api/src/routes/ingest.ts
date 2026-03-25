@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { supabase } from "../config/supabase.js";
-import { parseCsv, parseExcel } from "../services/profiler.js";
+import { parseCsv, parseExcel, peekExcelSheets } from "../services/profiler.js";
 import { downloadFile, deleteFiles } from "../services/storage.js";
 import { ValidationError } from "../lib/errors.js";
 import { env } from "../config/env.js";
@@ -11,8 +11,19 @@ function sseWrite(raw: { write: (chunk: string) => boolean }, type: string, data
 }
 
 export const ingestRoutes: FastifyPluginAsync = async (app) => {
-  app.post<{ Querystring: { projectId: string; nodeId: string } }>("/", async (request, reply) => {
-    const { projectId, nodeId } = request.query;
+  app.post("/peek-sheets", async (request) => {
+    const file = await request.file();
+    if (!file) throw new ValidationError("No file uploaded");
+
+    const isExcel = /\.(xlsx|xls)$/i.test(file.filename);
+    if (!isExcel) return { sheets: [] };
+
+    const buffer = await file.toBuffer();
+    return { sheets: peekExcelSheets(buffer) };
+  });
+
+  app.post<{ Querystring: { projectId: string; nodeId: string; sheetName?: string } }>("/", async (request, reply) => {
+    const { projectId, nodeId, sheetName } = request.query;
     if (!projectId || !nodeId) throw new ValidationError("projectId and nodeId are required");
 
     const file = await request.file();
@@ -49,6 +60,7 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
         filename: file.filename,
         buffer,
         fileType,
+        sheetName: sheetName || undefined,
         onProgress: (type, data) => sseWrite(reply.raw, type, data),
       });
     } catch (err) {

@@ -2,8 +2,14 @@ import { supabase } from "../config/supabase.js";
 
 const BUCKET = "caremap-files";
 
-export function rawPath(projectId: string, sourceFileId: string): string {
-  return `raw/${projectId}/${sourceFileId}/original.csv`;
+export function rawPath(projectId: string, sourceFileId: string, ext = "csv"): string {
+  return `raw/${projectId}/${sourceFileId}/original.${ext}`;
+}
+
+export function resolveFileExt(fileType: string | null, storagePath: string): string {
+  if (fileType === "xlsx" || fileType === "xls") return ".xlsx";
+  if (storagePath.endsWith(".parquet")) return ".parquet";
+  return ".csv";
 }
 
 export function cleanedPath(projectId: string, sourceFileId: string): string {

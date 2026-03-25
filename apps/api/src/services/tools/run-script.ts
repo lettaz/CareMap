@@ -3,6 +3,7 @@ import { z } from "zod";
 import { executeWithFileUpload } from "../sandbox.js";
 import { supabase } from "../../config/supabase.js";
 import { isYoloMode } from "../../lib/yolo.js";
+import { resolveFileExt } from "../storage.js";
 
 export const runScriptTool = tool({
   description:
@@ -24,7 +25,7 @@ export const runScriptTool = tool({
       const nameMap = new Map<string, string>();
       const seenNames = new Map<string, number>();
 
-      function trackName(path: string, rawName: string) {
+      function trackName(path: string, rawName: string, fileType?: string | null) {
         storagePaths.push(path);
         let baseName = rawName
           .replace(/\.(csv|parquet|xlsx|json|txt)$/i, "")
@@ -33,19 +34,21 @@ export const runScriptTool = tool({
         const count = seenNames.get(baseName) ?? 0;
         seenNames.set(baseName, count + 1);
         if (count > 0) baseName = `${baseName}_${count}`;
-        const ext = path.endsWith(".parquet") ? ".parquet" : ".csv";
+        const ext = resolveFileExt(fileType ?? null, path);
         nameMap.set(path, `${baseName}${ext}`);
       }
 
       if (sourceFileIds?.length) {
         const { data: files } = await supabase
           .from("source_files")
-          .select("filename, cleaned_path, storage_path")
+          .select("filename, cleaned_path, storage_path, file_type")
           .in("id", sourceFileIds);
 
         for (const f of files ?? []) {
-          const path = (f.cleaned_path as string) || (f.storage_path as string);
-          if (path) trackName(path, f.filename as string);
+          const useCleaned = !!(f.cleaned_path as string);
+          const path = useCleaned ? (f.cleaned_path as string) : (f.storage_path as string);
+          const fileType = useCleaned ? null : (f.file_type as string | null);
+          if (path) trackName(path, f.filename as string, fileType);
         }
       } else {
         let entitiesQuery = supabase

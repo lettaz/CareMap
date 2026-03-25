@@ -1,5 +1,6 @@
 import { supabase } from "../config/supabase.js";
-import { getSignedFileUrls, executeInSandbox } from "./sandbox.js";
+import { getSignedFileUrls, executeInSandbox, ENSURE_EXCEL_DEPS } from "./sandbox.js";
+import { resolveFileExt } from "./storage.js";
 
 export type QueryStage = "source" | "mapped" | "harmonized";
 
@@ -61,7 +62,7 @@ async function resolveFiles(
 
   const query = supabase
     .from("source_files")
-    .select("id, filename, storage_path, cleaned_path, status");
+    .select("id, filename, storage_path, cleaned_path, file_type, status");
 
   if (sourceFileIds?.length) {
     query.in("id", sourceFileIds);
@@ -75,8 +76,9 @@ async function resolveFiles(
   return (files ?? [])
     .filter((f) => (f.cleaned_path as string) || (f.storage_path as string))
     .map((f) => {
-      const storagePath = (f.cleaned_path as string) || (f.storage_path as string);
-      const ext = storagePath.endsWith(".parquet") ? ".parquet" : ".csv";
+      const useCleaned = !!(f.cleaned_path as string);
+      const storagePath = useCleaned ? (f.cleaned_path as string) : (f.storage_path as string);
+      const ext = useCleaned ? ".csv" : resolveFileExt(f.file_type as string | null, storagePath);
       let baseName = sanitizeTableName(f.filename as string);
 
       const count = seen.get(baseName) ?? 0;
@@ -89,9 +91,10 @@ async function resolveFiles(
 
 function buildSqlQueryCode(sql: string): string {
   return `
-import subprocess, sys
+${ENSURE_EXCEL_DEPS}import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "duckdb"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 import duckdb
+import pandas as _pd
 import json
 import os
 
@@ -99,9 +102,14 @@ conn = duckdb.connect()
 
 for f in os.listdir("/tmp/data"):
     table_name = f.rsplit(".", 1)[0]
-    ext = f.rsplit(".", 1)[-1]
+    ext = f.rsplit(".", 1)[-1].lower()
     if ext == "parquet":
         conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM read_parquet('/tmp/data/{f}')")
+    elif ext in ("xlsx", "xls"):
+        _df = _pd.read_excel(f"/tmp/data/{f}")
+        conn.register("_df_view", _df)
+        conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM _df_view")
+        conn.unregister("_df_view")
     elif ext == "csv":
         conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM read_csv('/tmp/data/{f}', auto_detect=true)")
 
@@ -113,16 +121,18 @@ print(json.dumps({"rows": rows, "rowCount": len(result), "columns": list(result.
 
 function buildPythonQueryCode(code: string): string {
   return `
-import pandas as pd
+${ENSURE_EXCEL_DEPS}import pandas as pd
 import json
 import os
 
 dataframes = {}
 for f in os.listdir("/tmp/data"):
     table_name = f.rsplit(".", 1)[0]
-    ext = f.rsplit(".", 1)[-1]
+    ext = f.rsplit(".", 1)[-1].lower()
     if ext == "parquet":
         dataframes[table_name] = pd.read_parquet(f"/tmp/data/{f}")
+    elif ext in ("xlsx", "xls"):
+        dataframes[table_name] = pd.read_excel(f"/tmp/data/{f}")
     elif ext == "csv":
         dataframes[table_name] = pd.read_csv(f"/tmp/data/{f}")
 

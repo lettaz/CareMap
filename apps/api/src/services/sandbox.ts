@@ -22,6 +22,11 @@ const DEFAULT_TIMEOUT = 30_000;
 const DEFAULT_MAX_ROWS = 1000;
 const DEFAULT_MAX_RETRIES = 2;
 
+export const ENSURE_EXCEL_DEPS = `import subprocess as __sp, sys as __sys
+__sp.check_call([__sys.executable, "-m", "pip", "install", "-q", "openpyxl"], stdout=__sp.DEVNULL, stderr=__sp.DEVNULL)
+del __sp, __sys
+`;
+
 const TRANSIENT_ERROR_PATTERNS = [
   "port is not open",
   "sandbox timeout",

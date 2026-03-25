@@ -123,10 +123,32 @@ export function parseCsv(content: string, delimiter?: string): ParseResult {
   };
 }
 
-export function parseExcel(buffer: Buffer): ParseResult {
+export interface ExcelSheetInfo {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+}
+
+export function peekExcelSheets(buffer: Buffer): ExcelSheetInfo[] {
   const workbook = XLSX.read(buffer, { type: "buffer" });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return { columns: [], rows: [], rowCount: 0, renames: [] };
+  return workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name]!;
+    const range = XLSX.utils.decode_range(sheet["!ref"] ?? "A1");
+    return {
+      name,
+      rowCount: Math.max(0, range.e.r - range.s.r),
+      columnCount: range.e.c - range.s.c + 1,
+    };
+  });
+}
+
+export function parseExcel(buffer: Buffer, targetSheet?: string): ParseResult {
+  const workbook = XLSX.read(buffer, { type: "buffer" });
+
+  const sheetName = targetSheet ?? workbook.SheetNames[0];
+  if (!sheetName || !workbook.Sheets[sheetName]) {
+    return { columns: [], rows: [], rowCount: 0, renames: [] };
+  }
 
   const sheet = workbook.Sheets[sheetName]!;
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);

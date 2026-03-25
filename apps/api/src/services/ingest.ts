@@ -10,6 +10,7 @@ export interface IngestOptions {
   filename: string;
   buffer: Buffer;
   fileType: "csv" | "tsv" | "xlsx" | "webhook-json";
+  sheetName?: string;
   onProgress?: (type: string, data: unknown) => void;
 }
 
@@ -30,7 +31,7 @@ export interface IngestResult {
 }
 
 export async function ingestBuffer(opts: IngestOptions): Promise<IngestResult> {
-  const { projectId, nodeId, filename, buffer, fileType, onProgress } = opts;
+  const { projectId, nodeId, filename, buffer, fileType, sheetName, onProgress } = opts;
   const emit = onProgress ?? (() => {});
 
   const parseStep = await logStep({
@@ -45,7 +46,7 @@ export async function ingestBuffer(opts: IngestOptions): Promise<IngestResult> {
   const isTsv = fileType === "tsv";
 
   const parsed = isExcel
-    ? parseExcel(buffer)
+    ? parseExcel(buffer, sheetName)
     : parseCsv(buffer.toString("utf-8"), isTsv ? "\t" : undefined);
 
   const parseOutput = {
@@ -77,7 +78,8 @@ export async function ingestBuffer(opts: IngestOptions): Promise<IngestResult> {
     throw new Error(`Failed to create source file record: ${sfErr?.message}`);
   }
 
-  const storagePath = rawPath(projectId, sourceFile.id);
+  const storageExt = isExcel ? "xlsx" : isTsv ? "tsv" : "csv";
+  const storagePath = rawPath(projectId, sourceFile.id, storageExt);
   const uploadMime = isExcel
     ? "application/octet-stream"
     : isTsv

@@ -3,7 +3,7 @@ import {
   MessageCircle, X, AlertTriangle, Filter, Loader2,
   Database, Server, Globe, Clock, Lock, Sparkles, CheckCircle2,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Pin, ShieldCheck,
+  Pin, ShieldCheck, FileSpreadsheet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -22,11 +22,13 @@ import { uploadWithSSE } from "@/lib/api/sse";
 import {
   fetchDetailedProfile,
   fetchSampleRows,
+  peekSheets,
   type DetailedProfileDTO,
+  type ExcelSheetInfo,
 } from "@/lib/api/ingest";
 import type { SourcePreview, SourcePreviewColumn } from "@/lib/types";
 
-type PanelPhase = "upload" | "analyzing" | "preview";
+type PanelPhase = "upload" | "sheet-picker" | "analyzing" | "preview";
 type DataView = "original" | "cleaned";
 
 export interface CleaningPlanItem {
@@ -87,6 +89,8 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const [sourceTab, setSourceTab] = useState<"data" | "ingestion">("data");
   const [dataView, setDataView] = useState<DataView>("original");
   const [cleaningPlan, setCleaningPlan] = useState<CleaningPlanData | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [excelSheets, setExcelSheets] = useState<ExcelSheetInfo[]>([]);
   const prevNodeId = useRef(nodeId);
 
   useEffect(() => {
@@ -97,6 +101,8 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
       setCleanedSampleRows(null);
       setCleanedTotal(null);
       setCleaningPlan(null);
+      setPendingFile(null);
+      setExcelSheets([]);
       setShowIssuesOnly(false);
       setError(null);
       setDataView("original");
@@ -162,8 +168,8 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
     setDataView("cleaned");
   }, [cleanedAt]);
 
-  const handleFileSelected = useCallback(
-    (file: File) => {
+  const startIngest = useCallback(
+    (file: File, sheetName?: string) => {
       if (!projectId) return;
 
       setUploadedFile({ name: file.name, size: formatFileSize(file.size) });
@@ -177,16 +183,20 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         { label: "Generating cleaning plan", status: "pending" },
       ]);
 
-      updateNodeData(projectId, nodeId, { label: file.name, status: "running" });
+      const displayName = sheetName ? `${file.name} [${sheetName}]` : file.name;
+      updateNodeData(projectId, nodeId, { label: displayName, status: "running" });
 
       let capturedSourceFileId = "";
       let capturedRowCount = 0;
       let capturedColumnCount = 0;
 
+      const queryParams: Record<string, string> = { projectId, nodeId };
+      if (sheetName) queryParams.sheetName = sheetName;
+
       uploadWithSSE(
         "/api/ingest",
         file,
-        { projectId, nodeId },
+        queryParams,
         {
           onEvent: (_evtType, data) => {
             const d = data as Record<string, unknown>;
@@ -249,7 +259,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                   ),
                 );
 
-                const suggestedLabel = (inner.suggestedLabel as string) ?? file.name.replace(/\.[^.]+$/, "");
+                const suggestedLabel = (inner.suggestedLabel as string) ?? displayName.replace(/\.[^.]+$/, "");
 
                 updateNodeData(projectId, nodeId, {
                   status: "ready",
@@ -323,7 +333,43 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         },
       );
     },
-    [projectId, nodeId, updateNodeData],
+    [projectId, nodeId, updateNodeData, notifySourceReady],
+  );
+
+  const handleFileSelected = useCallback(
+    async (file: File) => {
+      if (!projectId) return;
+
+      const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+      if (!isExcel) {
+        startIngest(file);
+        return;
+      }
+
+      try {
+        const sheets = await peekSheets(file);
+        if (sheets.length <= 1) {
+          startIngest(file);
+          return;
+        }
+        setPendingFile(file);
+        setExcelSheets(sheets);
+        setPhase("sheet-picker");
+      } catch {
+        startIngest(file);
+      }
+    },
+    [projectId, startIngest],
+  );
+
+  const handleSheetSelected = useCallback(
+    (sheetName: string) => {
+      if (!pendingFile) return;
+      setPendingFile(null);
+      setExcelSheets([]);
+      startIngest(pendingFile, sheetName);
+    },
+    [pendingFile, startIngest],
   );
 
   const setNodeContext = useAgentStore((s) => s.setNodeContext);
@@ -385,7 +431,9 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
       ? `${profile.rowCount.toLocaleString()} rows · ${profile.columnCount} columns`
       : phase === "analyzing"
         ? "Analyzing..."
-        : "Source node — no data uploaded";
+        : phase === "sheet-picker"
+          ? "Select a sheet"
+          : "Source node — no data uploaded";
 
   const handleRename = useCallback(
     (newName: string) => {
@@ -434,9 +482,8 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const handleExecuteCleaningPlan = useCallback(() => {
     if (!projectId || !sourceFileId || !node || !cleaningPlan) return;
 
-    const scriptBlock = "```python\n" + cleaningPlan.script + "\n```";
     setPendingMessage({
-      text: `Execute the following cleaning script for this source. Use execute_cleaning with this exact script — do NOT call suggest_cleaning again.\n\n${scriptBlock}`,
+      text: `Execute the auto-generated cleaning plan for this source (${cleaningPlan.actionCount} fixes). Use the script from the source's cleaning_plan — do NOT call suggest_cleaning again.`,
       mentions: [{
         label: node.data.label,
         id: nodeId,
@@ -545,6 +592,15 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         <div className="flex-1 overflow-y-auto p-4">
           <SourceUploadZone onFileSelected={handleFileSelected} />
         </div>
+      )}
+
+      {phase === "sheet-picker" && pendingFile && (
+        <SheetPicker
+          filename={pendingFile.name}
+          sheets={excelSheets}
+          onSelect={handleSheetSelected}
+          onCancel={() => { setPendingFile(null); setExcelSheets([]); setPhase("upload"); }}
+        />
       )}
 
       {sourceTab === "data" && phase === "preview" && preview && (
@@ -912,6 +968,72 @@ function CleanedDataView({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SheetPicker({
+  filename,
+  sheets,
+  onSelect,
+  onCancel,
+}: {
+  filename: string;
+  sheets: ExcelSheetInfo[];
+  onSelect: (sheetName: string) => void;
+  onCancel: () => void;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <FileSpreadsheet className="h-5 w-5 text-blue-600" />
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-cm-text-primary truncate">{filename}</p>
+          <p className="text-xs text-cm-text-tertiary">
+            {sheets.length} sheet{sheets.length !== 1 ? "s" : ""} detected — pick one to ingest
+          </p>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
+        {sheets.map((sheet) => (
+          <button
+            key={sheet.name}
+            type="button"
+            onClick={() => setSelected(sheet.name)}
+            className={`w-full text-left rounded-lg border px-3 py-2.5 transition-all ${
+              selected === sheet.name
+                ? "border-cm-accent bg-cm-accent-subtle/30 ring-1 ring-cm-accent/30"
+                : "border-cm-border-primary bg-cm-bg-elevated hover:border-cm-accent/50"
+            }`}
+          >
+            <p className="text-xs font-medium text-cm-text-primary">{sheet.name}</p>
+            <p className="mt-0.5 text-[10px] text-cm-text-tertiary">
+              ~{sheet.rowCount.toLocaleString()} rows · {sheet.columnCount} columns
+            </p>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-cm-border-primary shrink-0">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 rounded-md border border-cm-border-primary px-3 py-2 text-xs font-medium text-cm-text-secondary hover:bg-cm-bg-elevated transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={!selected}
+          onClick={() => selected && onSelect(selected)}
+          className="flex-1 rounded-md bg-cm-accent px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-cm-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Continue
+        </button>
+      </div>
     </div>
   );
 }

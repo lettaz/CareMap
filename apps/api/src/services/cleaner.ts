@@ -1,7 +1,7 @@
 import { streamText } from "ai";
 import { supabase } from "../config/supabase.js";
 import { getModel } from "../config/ai.js";
-import { createSandbox, getSignedFileUrls, buildFileDownloadPreamble } from "./sandbox.js";
+import { createSandbox, getSignedFileUrls, buildFileDownloadPreamble, ENSURE_EXCEL_DEPS } from "./sandbox.js";
 import { cleanedPath, uploadFile } from "./storage.js";
 
 export interface CleaningPlan {
@@ -129,11 +129,17 @@ export function wrapCleaningScript(
   inputFilename: string,
   outputPath: string,
 ): string {
-  return `import pandas as pd
+  return `${ENSURE_EXCEL_DEPS}import pandas as pd
 import numpy as np
 import json, sys
 
-df = pd.read_csv("/tmp/data/${inputFilename}") if "${inputFilename}".endswith(".csv") else pd.read_parquet("/tmp/data/${inputFilename}")
+_input_path = "/tmp/data/${inputFilename}"
+if _input_path.endswith((".xlsx", ".xls")):
+    df = pd.read_excel(_input_path)
+elif _input_path.endswith(".parquet"):
+    df = pd.read_parquet(_input_path)
+else:
+    df = pd.read_csv(_input_path)
 rows_before = len(df)
 step_results = []
 summary = {}
@@ -173,7 +179,7 @@ export async function executeCleaning(
 ): Promise<CleaningResult> {
   const { data: sourceFile } = await supabase
     .from("source_files")
-    .select("storage_path, filename")
+    .select("storage_path, filename, file_type")
     .eq("id", sourceFileId)
     .single();
 
@@ -184,13 +190,17 @@ export async function executeCleaning(
   await supabase.from("source_files").update({ status: "cleaning" }).eq("id", sourceFileId);
 
   const originalFilename = sourceFile.filename as string;
-  const downloadName = `${sanitizeFilename(originalFilename)}.csv`;
+  const fileType = sourceFile.file_type as string | null;
+  const isExcel = fileType === "xlsx" || fileType === "xls" || /\.(xlsx|xls)$/i.test(originalFilename);
+  const ext = isExcel ? ".xlsx" : ".csv";
+  const downloadName = `${sanitizeFilename(originalFilename)}${ext}`;
 
   const nameMap = new Map([[sourceFile.storage_path as string, downloadName]]);
   const fileUrls = await getSignedFileUrls([sourceFile.storage_path], nameMap);
   const preamble = buildFileDownloadPreamble(fileUrls);
 
-  const outputFilePath = `/tmp/output/cleaned_${downloadName}`;
+  const cleanedOutputName = `cleaned_${sanitizeFilename(originalFilename)}.csv`;
+  const outputFilePath = `/tmp/output/${cleanedOutputName}`;
   const script = wrapCleaningScript(userScript, downloadName, outputFilePath);
 
   const fullCode = `

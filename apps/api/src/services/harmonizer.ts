@@ -1,6 +1,6 @@
 import { supabase } from "../config/supabase.js";
-import { createSandbox, getSignedFileUrls } from "./sandbox.js";
-import { harmonizedTablePath, manifestPath, uploadFile } from "./storage.js";
+import { createSandbox, getSignedFileUrls, ENSURE_EXCEL_DEPS } from "./sandbox.js";
+import { harmonizedTablePath, manifestPath, uploadFile, resolveFileExt } from "./storage.js";
 import { updateSemanticLayer } from "./semantic.js";
 import type { FieldMappingRow } from "../lib/types/database.js";
 
@@ -40,6 +40,7 @@ export function buildHarmonizationScript(
   sourceFileMap: Map<string, { cleanedPath: string; filename: string; downloadName: string }>,
 ): string {
   const lines = [
+    ENSURE_EXCEL_DEPS.trim(),
     "import pandas as pd",
     "import json",
     "import os",
@@ -53,7 +54,13 @@ export function buildHarmonizationScript(
     const info = sourceFileMap.get(sid);
     if (!info) continue;
     const fname = info.downloadName;
-    lines.push(`src_${sid.replace(/-/g, "_")} = pd.read_parquet("/tmp/data/${fname}") if "${fname}".endswith(".parquet") else pd.read_csv("/tmp/data/${fname}", sep=None, engine="python")`);
+    lines.push(`_ext_${sid.replace(/-/g, "_")} = "${fname}".rsplit(".", 1)[-1].lower()`);
+    lines.push(`if _ext_${sid.replace(/-/g, "_")} == "parquet":`);
+    lines.push(`    src_${sid.replace(/-/g, "_")} = pd.read_parquet("/tmp/data/${fname}")`);
+    lines.push(`elif _ext_${sid.replace(/-/g, "_")} in ("xlsx", "xls"):`);
+    lines.push(`    src_${sid.replace(/-/g, "_")} = pd.read_excel("/tmp/data/${fname}")`);
+    lines.push(`else:`);
+    lines.push(`    src_${sid.replace(/-/g, "_")} = pd.read_csv("/tmp/data/${fname}", sep=None, engine="python")`);
   }
   lines.push("");
 
@@ -153,7 +160,7 @@ export async function harmonize(
   const sourceIds = [...new Set(mappings.map((m: FieldMappingRow) => m.source_file_id))];
   const { data: sourceFiles } = await supabase
     .from("source_files")
-    .select("id, filename, storage_path, cleaned_path, status")
+    .select("id, filename, storage_path, cleaned_path, file_type, status")
     .in("id", sourceIds);
 
   if (!sourceFiles?.length) throw new Error("No source files found for mappings");
@@ -164,9 +171,10 @@ export async function harmonize(
   const seenNames = new Map<string, number>();
 
   for (const sf of sourceFiles) {
-    const path = (sf.cleaned_path as string) || (sf.storage_path as string);
+    const useCleaned = !!(sf.cleaned_path as string);
+    const path = useCleaned ? (sf.cleaned_path as string) : (sf.storage_path as string);
     if (!path) continue;
-    const ext = path.endsWith(".parquet") ? ".parquet" : ".csv";
+    const ext = useCleaned ? ".csv" : resolveFileExt(sf.file_type as string | null, path);
 
     let baseName = (sf.filename as string)
       .replace(/\.(csv|parquet|xlsx|json|txt)$/i, "")

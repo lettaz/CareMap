@@ -2,6 +2,7 @@ import { tool, generateText } from "ai";
 import { z } from "zod";
 import { getModel } from "../../config/ai.js";
 import { supabase } from "../../config/supabase.js";
+import { resolveFileExt } from "../storage.js";
 import type { FieldMappingRow } from "../../lib/types/database.js";
 
 const HARMONIZATION_PROMPT = `You are a senior data engineer writing a Python pandas script to harmonize clinical data.
@@ -15,7 +16,7 @@ Write a pandas script that:
 
 ## File Loading
 - Source files are already downloaded to /tmp/data/ with the exact filenames provided.
-- Use pd.read_csv(path, sep=None, engine="python") for CSV, pd.read_parquet(path) for Parquet.
+- Use pd.read_csv(path, sep=None, engine="python") for CSV, pd.read_parquet(path) for Parquet, pd.read_excel(path) for .xlsx/.xls files.
 
 ## Intelligent Merging (CRITICAL)
 - Do NOT blindly pd.concat all source frames into each target table.
@@ -50,7 +51,7 @@ Write a pandas script that:
 
 ## Requirements
 - Create /tmp/harmonized/ directory at the start.
-- Import only: pandas, json, os.
+- Import only: pandas, json, os. openpyxl is pre-installed for Excel support.
 - Handle edge cases: empty DataFrames, missing columns, type mismatches.
 - NEVER use display() or show() — only print().
 
@@ -173,7 +174,7 @@ export const generateHarmonizationScriptTool = tool({
       }
 
       const [{ data: sourceFiles }, { data: profiles }, { data: projectSchemaRow }] = await Promise.all([
-        supabase.from("source_files").select("id, filename, storage_path, cleaned_path, status").in("id", sourceIds),
+        supabase.from("source_files").select("id, filename, storage_path, cleaned_path, file_type, status").in("id", sourceIds),
         supabase.from("source_profiles").select("source_file_id, column_name, inferred_type, semantic_label").in("source_file_id", sourceIds),
         scopedSchemaTables === null
           ? supabase
@@ -198,9 +199,10 @@ export const generateHarmonizationScriptTool = tool({
       const sourceContexts: SourceContext[] = [];
 
       for (const sf of sourceFiles) {
-        const path = (sf.cleaned_path as string) || (sf.storage_path as string);
+        const useCleaned = !!(sf.cleaned_path as string);
+        const path = useCleaned ? (sf.cleaned_path as string) : (sf.storage_path as string);
         if (!path) continue;
-        const ext = path.endsWith(".parquet") ? ".parquet" : ".csv";
+        const ext = useCleaned ? ".csv" : resolveFileExt(sf.file_type as string | null, path);
 
         let baseName = (sf.filename as string)
           .replace(/\.(csv|parquet|xlsx|json|txt)$/i, "")

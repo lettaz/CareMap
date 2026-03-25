@@ -1,8 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { supabase } from "../../config/supabase.js";
-import { createSandbox, getSignedFileUrls } from "../sandbox.js";
-import { harmonizedTablePath, manifestPath, uploadFile } from "../storage.js";
+import { createSandbox, getSignedFileUrls, ENSURE_EXCEL_DEPS } from "../sandbox.js";
+import { harmonizedTablePath, manifestPath, uploadFile, resolveFileExt } from "../storage.js";
 import { updateSemanticLayer } from "../semantic.js";
 import { isYoloMode } from "../../lib/yolo.js";
 import type { FieldMappingRow } from "../../lib/types/database.js";
@@ -43,7 +43,7 @@ export const executeHarmonizationScriptTool = tool({
       const sourceIds = [...new Set(mappings.map((m: FieldMappingRow) => m.source_file_id))];
       const { data: sourceFiles } = await supabase
         .from("source_files")
-        .select("id, filename, storage_path, cleaned_path, status")
+        .select("id, filename, storage_path, cleaned_path, file_type, status")
         .in("id", sourceIds);
 
       if (!sourceFiles?.length) {
@@ -55,9 +55,10 @@ export const executeHarmonizationScriptTool = tool({
       const seenNames = new Map<string, number>();
 
       for (const sf of sourceFiles) {
-        const path = (sf.cleaned_path as string) || (sf.storage_path as string);
+        const useCleaned = !!(sf.cleaned_path as string);
+        const path = useCleaned ? (sf.cleaned_path as string) : (sf.storage_path as string);
         if (!path) continue;
-        const ext = path.endsWith(".parquet") ? ".parquet" : ".csv";
+        const ext = useCleaned ? ".csv" : resolveFileExt(sf.file_type as string | null, path);
 
         let baseName = (sf.filename as string)
           .replace(/\.(csv|parquet|xlsx|json|txt)$/i, "")
@@ -76,6 +77,7 @@ export const executeHarmonizationScriptTool = tool({
       const fileUrls = await getSignedFileUrls(storagePaths, downloadNameMap);
 
       const preambleLines = [
+        ENSURE_EXCEL_DEPS.trim(),
         "import os, urllib.request",
         'os.makedirs("/tmp/data", exist_ok=True)',
         'os.makedirs("/tmp/harmonized", exist_ok=True)',
