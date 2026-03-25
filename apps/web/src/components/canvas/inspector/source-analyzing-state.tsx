@@ -3,6 +3,7 @@ import { Loader2, FileSpreadsheet } from "lucide-react";
 interface AnalysisStepData {
   label: string;
   status: "pending" | "running" | "completed" | "error" | "failed";
+  detail?: string;
 }
 
 interface SourceAnalyzingStateProps {
@@ -42,7 +43,7 @@ export function SourceAnalyzingState({ filename, fileSize, steps }: SourceAnalyz
 
       <div className="space-y-3">
         {displaySteps.map((step) => (
-          <AnalysisStep key={step.label} label={step.label} status={step.status} />
+          <AnalysisStep key={step.label} label={step.label} status={step.status} detail={step.detail} />
         ))}
       </div>
 
@@ -70,9 +71,11 @@ export function SourceAnalyzingState({ filename, fileSize, steps }: SourceAnalyz
 function AnalysisStep({
   label,
   status,
+  detail,
 }: {
   label: string;
   status: "pending" | "running" | "completed" | "error" | "failed";
+  detail?: string;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -98,19 +101,24 @@ function AnalysisStep({
           <div className="h-2 w-2 rounded-full bg-cm-bg-elevated" />
         </div>
       )}
-      <span
-        className={`text-xs ${
-          status === "completed"
-            ? "text-cm-text-secondary"
-            : status === "running"
-              ? "text-cm-text-primary font-medium"
-              : status === "error" || status === "failed"
-                ? "text-amber-600"
-                : "text-cm-text-tertiary"
-        }`}
-      >
-        {label}{status === "failed" ? " (skipped)" : ""}
-      </span>
+      <div className="flex flex-col">
+        <span
+          className={`text-xs ${
+            status === "completed"
+              ? "text-cm-text-secondary"
+              : status === "running"
+                ? "text-cm-text-primary font-medium"
+                : status === "error" || status === "failed"
+                  ? "text-amber-600"
+                  : "text-cm-text-tertiary"
+          }`}
+        >
+          {label}{status === "failed" ? " (skipped)" : ""}
+        </span>
+        {detail && status === "running" && (
+          <span className="text-[10px] text-cm-accent animate-pulse">{detail}</span>
+        )}
+      </div>
     </div>
   );
 }

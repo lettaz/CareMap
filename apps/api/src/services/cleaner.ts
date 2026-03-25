@@ -1,4 +1,4 @@
-import { generateText } from "ai";
+import { streamText } from "ai";
 import { supabase } from "../config/supabase.js";
 import { getModel } from "../config/ai.js";
 import { createSandbox, getSignedFileUrls, buildFileDownloadPreamble } from "./sandbox.js";
@@ -38,7 +38,10 @@ Return a JSON object:
 The script has access to: df (DataFrame), pd, np, json, log_step(step_num, column, action, rows_before, rows_after, warn="").
 Do NOT import anything or read/write files — that is handled by the framework.`;
 
-export async function generateCleaningPlan(sourceFileId: string): Promise<CleaningPlanResult> {
+export async function generateCleaningPlan(
+  sourceFileId: string,
+  onChunk?: (delta: string) => void,
+): Promise<CleaningPlanResult> {
   const { data: profiles } = await supabase
     .from("source_profiles")
     .select()
@@ -56,7 +59,7 @@ export async function generateCleaningPlan(sourceFileId: string): Promise<Cleani
     confidence: p.confidence,
   }));
 
-  const { text } = await generateText({
+  const stream = streamText({
     model: getModel(),
     messages: [
       { role: "system", content: CLEANING_SYSTEM_PROMPT },
@@ -65,7 +68,13 @@ export async function generateCleaningPlan(sourceFileId: string): Promise<Cleani
     temperature: 0.1,
   });
 
-  const jsonStr = text.replace(/```json\n?|\n?```/g, "").trim();
+  let accumulated = "";
+  for await (const chunk of stream.textStream) {
+    accumulated += chunk;
+    onChunk?.(chunk);
+  }
+
+  const jsonStr = accumulated.replace(/```json\n?|\n?```/g, "").trim();
   const result = JSON.parse(jsonStr) as CleaningPlan;
 
   return {

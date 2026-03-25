@@ -201,7 +201,13 @@ export async function ingestBuffer(opts: IngestOptions): Promise<IngestResult> {
     });
     emit("step", { stepType: "suggest_cleaning", status: "running" });
 
-    const result = await generateCleaningPlan(sourceFile.id);
+    let charCount = 0;
+    const result = await generateCleaningPlan(sourceFile.id, (delta) => {
+      charCount += delta.length;
+      if (charCount % 80 < delta.length) {
+        emit("cleaning_plan_stream", { chars: charCount });
+      }
+    });
     cleaningPlanResult = result;
 
     await supabase

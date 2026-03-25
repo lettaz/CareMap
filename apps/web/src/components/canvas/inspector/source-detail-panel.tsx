@@ -50,6 +50,7 @@ interface SourceDetailPanelProps {
 interface AnalysisStep {
   label: string;
   status: "pending" | "running" | "completed" | "error" | "failed";
+  detail?: string;
 }
 
 function formatFileSize(bytes: number): string {
@@ -278,10 +279,21 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
 
                 break;
               }
+              case "cleaning_plan_stream": {
+                const chars = inner.chars as number;
+                setSteps((prev) =>
+                  prev.map((s) =>
+                    s.label.includes("cleaning plan")
+                      ? { ...s, status: "running", detail: `AI writing plan... ${chars} chars` }
+                      : s,
+                  ),
+                );
+                break;
+              }
               case "cleaning_plan_ready": {
                 const plan = inner as unknown as CleaningPlanData;
                 setCleaningPlan(plan);
-                setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" as const })));
+                setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" as const, detail: undefined })));
                 notifySourceReady(projectId, nodeId);
                 break;
               }
@@ -540,7 +552,6 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
           <SourceSummaryBar
             preview={preview}
             onAiClick={handleOpenChat}
-            cleaningPlanReady={!!cleaningPlan && !hasCleanedVersion}
           />
 
           {cleaningPlan && !hasCleanedVersion && dataView === "original" && (
