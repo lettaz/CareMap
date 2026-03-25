@@ -49,7 +49,6 @@ const TOOL_LABELS: Record<string, string> = {
   propose_target_schema: "Proposing schema",
   propose_mappings: "Proposing mappings",
   confirm_mappings: "Confirming mappings",
-  run_harmonization: "Running harmonization",
   generate_harmonization_script: "Generating harmonization script",
   execute_harmonization_script: "Executing harmonization",
   run_query: "Querying data",
@@ -75,8 +74,8 @@ const TOOL_FOLLOW_UPS: Record<string, string[]> = {
   execute_cleaning: ["Re-profile the cleaned data", "Propose a target schema"],
   propose_target_schema: ["Show the proposed schema details", "Propose field mappings"],
   propose_mappings: ["Review the mappings", "Accept all high-confidence mappings"],
-  confirm_mappings: ["Run harmonization", "Check mapping coverage"],
-  run_harmonization: ["Run a quality check", "Query the harmonized data"],
+  confirm_mappings: ["Generate harmonization script", "Check mapping coverage"],
+  execute_harmonization_script: ["Run a quality check", "Query the harmonized data"],
   run_query: ["Export this data as CSV", "Generate a chart from these results"],
   run_script: ["Query the results", "Export the output"],
   generate_artifact: ["Pin this to the dashboard", "Run another query"],
@@ -162,12 +161,10 @@ function extractInputSnippet(toolName: string, input: unknown): { label: string 
         label: inp.format ? `Exporting as ${inp.format}` : "Exporting data",
         code: null,
       };
-    case "run_harmonization":
+    case "run_quality_check":
       return {
-        label: inp.mappingIds
-          ? `Harmonizing ${(inp.mappingIds as string[]).length} mapping(s)`
-          : "Running harmonization",
-        code: null,
+        label: (inp.description as string) ?? "Quality check",
+        code: (inp.script as string) ?? null,
       };
     case "confirm_mappings":
       return {
@@ -807,7 +804,7 @@ function ChatMessage({ message, onApprove, onReject }: ChatMessageProps) {
               execute_cleaning: "Cleaning Complete",
               propose_target_schema: "Target Schema Proposed",
               propose_mappings: "Field Mappings Ready",
-              run_harmonization: "Harmonization Complete",
+              execute_harmonization_script: "Harmonization Complete",
               run_query: "Query Results",
               generate_artifact: "Artifact Generated",
             };

@@ -311,10 +311,12 @@ export const pipelineRoutes: FastifyPluginAsync = async (app) => {
           userMessage =
             `Project ID: ${projectId}. The user triggered a quality check from quality node ${nodeId}. ` +
             (upstreamHarmonizeId ? `Upstream harmonize node: ${upstreamHarmonizeId}. ` : "") +
-            `Please run run_quality_check with nodeId="${nodeId}"` +
+            `Harmonized tables: ${JSON.stringify(tables)}. ` +
+            `Write a comprehensive Python quality-check script and run it via run_quality_check ` +
+            `with nodeId="${nodeId}"` +
             (upstreamHarmonizeId ? ` and harmonizeNodeId="${upstreamHarmonizeId}"` : "") +
-            ` to scan harmonized tables for null rates, duplicates, and range violations. ` +
-            `Harmonized tables: ${JSON.stringify(tables)}.`;
+            `. Check for: null rates, duplicates, outliers, type inconsistencies, referential integrity, ` +
+            `and any domain-specific issues you can detect from the data.`;
         } else if (sourceFileIds.length > 0) {
           userMessage =
             `Project ID: ${projectId}. The user triggered a quality check from quality node ${nodeId}. ` +
@@ -323,7 +325,8 @@ export const pipelineRoutes: FastifyPluginAsync = async (app) => {
         } else {
           userMessage =
             `Project ID: ${projectId}. The user triggered a quality check from quality node ${nodeId}. ` +
-            `Please run run_quality_check with nodeId="${nodeId}" to scan all available data for quality issues.`;
+            `Write a quality-check script and run it via run_quality_check with nodeId="${nodeId}" ` +
+            `to scan all available data.`;
         }
         break;
       }

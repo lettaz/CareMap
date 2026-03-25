@@ -4,16 +4,29 @@ import { executeWithFileUpload } from "../sandbox.js";
 import { supabase } from "../../config/supabase.js";
 
 export const runQualityCheckTool = tool({
-  description: "Load harmonized Parquet files and compute quality metrics: null rates, range violations, duplicate counts. Writes quality alerts to Supabase.",
+  description:
+    "Execute a Python quality-check script against harmonized or source data in an E2B sandbox. " +
+    "The script should load files from /tmp/data/, analyze quality, and print a JSON line: " +
+    '{\"alerts\": [{\"severity\": \"warning\"|\"critical\"|\"info\", \"summary\": \"...\", \"affectedCount\": N}], \"tablesChecked\": N}. ' +
+    "The framework writes alerts to Supabase. " +
+    "You write the script — check for null rates, duplicates, outliers, schema violations, referential integrity, " +
+    "or anything else relevant to the data.",
   inputSchema: z.object({
     projectId: z.string().uuid(),
+    script: z
+      .string()
+      .describe(
+        "Python script to run quality checks. Files are in /tmp/data/ (csv/parquet). " +
+        "Must print one JSON line with {alerts: [...], tablesChecked: N}.",
+      ),
+    description: z.string().describe("Human-readable summary of what this quality check does"),
     nodeId: z.string().optional().describe("The quality node ID for scoping alerts"),
     harmonizeNodeId: z
       .string()
       .optional()
-      .describe("Upstream harmonize node ID to scope entity checks"),
+      .describe("Upstream harmonize node ID to scope entity loading"),
   }),
-  execute: async ({ projectId, nodeId, harmonizeNodeId }) => {
+  execute: async ({ projectId, script, description, nodeId, harmonizeNodeId }) => {
     let entitiesQuery = supabase
       .from("semantic_entities")
       .select("parquet_path, entity_name")
@@ -24,7 +37,7 @@ export const runQualityCheckTool = tool({
     const { data: entities } = await entitiesQuery;
 
     if (!entities?.length) {
-      return { message: "No harmonized data to check", alerts: [] };
+      return { success: false, message: "No harmonized data to check", alerts: [] };
     }
 
     const storagePaths: string[] = [];
@@ -38,63 +51,69 @@ export const runQualityCheckTool = tool({
       nameMap.set(e.parquet_path, `${entityName}.csv`);
     }
 
-    const pythonCode = `
-import pandas as pd
+    const wrappedScript = `import pandas as pd
+import numpy as np
 import json, os
 
-alerts = []
-checked = 0
+dataframes = {}
 for f in os.listdir("/tmp/data"):
+    path = f"/tmp/data/{f}"
     if f.endswith(".parquet"):
-        table_name = f.replace(".parquet", "")
-        df = pd.read_parquet(f"/tmp/data/{f}")
+        dataframes[f.replace(".parquet", "")] = pd.read_parquet(path)
     elif f.endswith(".csv"):
-        table_name = f.replace(".csv", "")
-        df = pd.read_csv(f"/tmp/data/{f}")
-    else:
-        continue
-    checked += 1
+        dataframes[f.replace(".csv", "")] = pd.read_csv(path)
 
-    for col in df.columns:
-        null_rate = df[col].isnull().mean()
-        if null_rate > 0.1:
-            alerts.append({
-                "severity": "warning" if null_rate < 0.3 else "critical",
-                "summary": f"{table_name}.{col}: {null_rate:.1%} null values",
-                "affectedCount": int(df[col].isnull().sum())
-            })
+alerts = []
+tables_checked = 0
 
-    dupes = df.duplicated().sum()
-    if dupes > 0:
-        alerts.append({
-            "severity": "warning",
-            "summary": f"{table_name}: {dupes} duplicate rows",
-            "affectedCount": int(dupes)
-        })
+def add_alert(severity, summary, affected_count=0):
+    alerts.append({"severity": severity, "summary": summary, "affectedCount": affected_count})
 
-print(json.dumps({"alerts": alerts, "tablesChecked": checked}))
+# ---- LLM-generated quality check logic ----
+${script}
+# ---- end quality check logic ----
+
+print(json.dumps({"alerts": alerts, "tablesChecked": tables_checked}))
 `;
 
-    const result = await executeWithFileUpload(pythonCode, storagePaths, { timeoutMs: 30_000 }, nameMap);
+    try {
+      const result = await executeWithFileUpload(wrappedScript, storagePaths, { timeoutMs: 60_000 }, nameMap);
 
-    const outputLine = result.stdout.split("\n").filter((l) => l.startsWith("{")).pop();
-    const output = outputLine
-      ? (JSON.parse(outputLine) as { alerts: Array<{ severity: string; summary: string; affectedCount: number }>; tablesChecked: number })
-      : { alerts: [], tablesChecked: 0 };
+      const outputLine = result.stdout.split("\n").filter((l) => l.startsWith("{")).pop();
+      const output = outputLine
+        ? (JSON.parse(outputLine) as {
+            alerts: Array<{ severity: string; summary: string; affectedCount: number }>;
+            tablesChecked: number;
+          })
+        : { alerts: [], tablesChecked: 0 };
 
-    for (const alert of output.alerts) {
-      await supabase.from("quality_alerts").insert({
-        project_id: projectId,
-        node_id: nodeId ?? null,
-        severity: alert.severity as "critical" | "warning" | "info",
-        summary: alert.summary,
-        affected_count: alert.affectedCount,
-        detection_method: "automated_quality_check",
-        acknowledged: false,
-        source_file_id: null,
-      });
+      for (const alert of output.alerts) {
+        await supabase.from("quality_alerts").insert({
+          project_id: projectId,
+          node_id: nodeId ?? null,
+          severity: alert.severity as "critical" | "warning" | "info",
+          summary: alert.summary,
+          affected_count: alert.affectedCount,
+          detection_method: description,
+          acknowledged: false,
+          source_file_id: null,
+        });
+      }
+
+      return {
+        success: true,
+        ...output,
+        script: wrappedScript,
+        description,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        error: message,
+        retryable: message.includes("sandbox") || message.includes("ECONN"),
+        suggestion: "Check the script for syntax errors or try again.",
+      };
     }
-
-    return output;
   },
 });

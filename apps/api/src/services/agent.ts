@@ -11,9 +11,17 @@ Decide what to do based on the user's message — there is no mode switch.
 
 ## Data Engineering (Pipeline) Capabilities
 When the user uploads files or asks about profiling, cleaning, mapping, or harmonizing:
-- Profile columns, propose cleaning plans, propose target schemas, map columns, and run harmonization.
+- Profile columns, propose cleaning plans, propose target schemas, map columns, and harmonize data.
 - For destructive operations (cleaning, harmonizing), explain what you plan to do before executing.
 - Column names in source data may be in German — translate and explain.
+
+### Core Pattern: LLM + Sandbox
+All data transformation tools follow the same pattern:
+1. You analyze the data (profiles, schemas, context).
+2. You write a Python script tailored to the task.
+3. The tool executes your script in an E2B sandbox.
+4. The framework handles file I/O, storage, and state updates.
+You have FULL FREEDOM to write any pandas/numpy code. There are no predefined action types or templates.
 
 ## Data Analysis (Analyst) Capabilities
 When the user asks questions about their data, requests insights, or wants visualizations:
@@ -75,6 +83,22 @@ CRITICAL CLEANING RULES:
 - For nulls: use fillna() with median/mean/mode/0/"unknown", interpolation, or add flag columns.
 - Always preserve row count. The only acceptable row-drop operation is deduplication.
 - You write the full Python script — you are NOT limited to predefined action types.
+
+## Harmonization Flow
+1. Use generate_harmonization_script to have the AI write a harmonization script based on accepted mappings, source files, and target schema.
+2. Present the script summary to the user for review.
+3. Call execute_harmonization_script with the generated script.
+4. The script runs in E2B, uploads harmonized tables, and updates the semantic layer.
+Do NOT use run_harmonization — it is deprecated.
+
+## Quality Check Flow
+1. Write a Python quality-check script that analyzes the data for issues.
+2. Call run_quality_check with your script. The framework pre-loads all files into /tmp/data/ and provides:
+   - dataframes dict (table_name -> DataFrame, pre-loaded)
+   - add_alert(severity, summary, affected_count) helper
+   - tables_checked counter (increment as you go)
+3. Check for: null rates, duplicates, outliers, type inconsistencies, value ranges, referential integrity, and domain-specific issues.
+4. The framework writes alerts to the database.
 
 ## Self-Healing: Catastrophic Data Loss
 When execute_cleaning returns catastrophicDataLoss=true:
@@ -186,7 +210,7 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
   sections.push(
     "\n## Available Tools\n" +
     "You have all pipeline and analyst tools. Use whichever tools are appropriate for the user's request.\n" +
-    "Pipeline: parse_file, profile_columns, suggest_cleaning, execute_cleaning, propose_target_schema, propose_mappings, confirm_mappings, generate_harmonization_script, execute_harmonization_script, run_harmonization\n" +
+    "Pipeline: parse_file, profile_columns, suggest_cleaning, execute_cleaning, propose_target_schema, propose_mappings, confirm_mappings, generate_harmonization_script, execute_harmonization_script\n" +
     "Analyst: run_query, run_script, generate_artifact, explain_lineage, export_data\n" +
     "Shared: run_quality_check, update_semantic_layer\n\n" +
     "## Node-Scoped Operations\n" +
@@ -209,9 +233,7 @@ async function buildSystemPrompt(projectId: string): Promise<string> {
     "When the user asks to harmonize data, follow this two-step flow:\n" +
     "1. Call generate_harmonization_script with the Harmonize nodeId. The tool resolves upstream transforms and their schemas/mappings automatically.\n" +
     "2. Present the script to the user and explain what it does.\n" +
-    "3. Call execute_harmonization_script with the same nodeId and the generated script. This requires user approval.\n" +
-    "Do NOT use run_harmonization for new harmonizations — it uses a legacy deterministic approach. " +
-    "Only use run_harmonization as a fallback if the AI-generated script fails repeatedly.",
+    "3. Call execute_harmonization_script with the same nodeId and the generated script. This requires user approval.",
   );
 
   return sections.join("\n");

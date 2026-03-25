@@ -46,7 +46,6 @@ export function ToolResultRenderer({ toolName, output }: ToolResultRendererProps
     case "suggest_cleaning":
       return <CleaningPlanResult data={data} />;
     case "execute_cleaning":
-    case "run_harmonization":
       return <PipelineResult data={data} toolName={toolName} />;
     case "generate_harmonization_script":
       return <HarmonizationScriptResult data={data} />;
@@ -62,6 +61,8 @@ export function ToolResultRenderer({ toolName, output }: ToolResultRendererProps
       return <ProfileResult data={data} />;
     case "generate_artifact":
       return <ArtifactResult data={data} />;
+    case "run_quality_check":
+      return <QualityCheckResult data={data} />;
     default:
       return <GenericResult data={data} />;
   }
@@ -1342,6 +1343,108 @@ function CleaningPlanResult({ data }: { data: Record<string, unknown> }) {
           <CodeBlock code={scriptCode} language="python" showLineNumbers>
             <CodeBlockHeader>
               <span className="text-[10px] font-mono">cleaning_plan.py</span>
+              <CodeBlockActions>
+                <CodeBlockCopyButton className="h-6 w-6" />
+              </CodeBlockActions>
+            </CodeBlockHeader>
+          </CodeBlock>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QualityCheckResult({ data }: { data: Record<string, unknown> }) {
+  const alerts = data.alerts as Array<{ severity: string; summary: string; affectedCount: number }> | undefined;
+  const tablesChecked = data.tablesChecked as number | undefined;
+  const scriptCode = data.script as string | undefined;
+  const success = data.success as boolean | undefined;
+  const [showScript, setShowScript] = useState(false);
+
+  if (success === false) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+        <XCircle className="h-4 w-4 shrink-0" />
+        {String(data.error ?? "Quality check failed")}
+      </div>
+    );
+  }
+
+  const criticalCount = alerts?.filter((a) => a.severity === "critical").length ?? 0;
+  const warningCount = alerts?.filter((a) => a.severity === "warning").length ?? 0;
+
+  return (
+    <div className="rounded-lg border border-cm-border-primary bg-cm-bg-surface overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-cm-border-subtle bg-gradient-to-r from-blue-50 to-indigo-50">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-100">
+            <Zap className="h-3.5 w-3.5 text-blue-700" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-cm-text-primary">Quality Check</p>
+            <p className="text-[10px] text-cm-text-tertiary">
+              {tablesChecked ?? 0} table{tablesChecked !== 1 ? "s" : ""} scanned
+              {alerts?.length ? ` · ${alerts.length} alert${alerts.length !== 1 ? "s" : ""}` : " · clean"}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {criticalCount > 0 && (
+            <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">
+              {criticalCount} critical
+            </span>
+          )}
+          {warningCount > 0 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+              {warningCount} warning{warningCount !== 1 ? "s" : ""}
+            </span>
+          )}
+          {scriptCode && (
+            <button
+              type="button"
+              onClick={() => setShowScript(!showScript)}
+              className="text-[10px] text-cm-accent hover:underline flex items-center gap-1"
+            >
+              <FileCode2 className="h-2.5 w-2.5" />
+              {showScript ? "Hide script" : "View script"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {alerts && alerts.length > 0 && (
+        <div className="divide-y divide-cm-border-subtle max-h-[250px] overflow-auto">
+          {alerts.map((alert, i) => (
+            <div key={i} className="px-3 py-1.5 flex items-center gap-2 text-[11px]">
+              <div className={cn(
+                "h-2 w-2 rounded-full shrink-0",
+                alert.severity === "critical" ? "bg-red-500"
+                  : alert.severity === "warning" ? "bg-amber-500"
+                  : "bg-blue-400",
+              )} />
+              <span className="flex-1 text-cm-text-secondary">{alert.summary}</span>
+              {alert.affectedCount > 0 && (
+                <span className="text-[10px] text-cm-text-tertiary tabular-nums">
+                  {alert.affectedCount.toLocaleString()} affected
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!alerts?.length && (
+        <div className="px-3 py-3 text-center text-[11px] text-green-600">
+          <CheckCircle2 className="h-4 w-4 mx-auto mb-1" />
+          No quality issues detected
+        </div>
+      )}
+
+      {showScript && scriptCode && (
+        <div className="border-t border-cm-border-subtle max-h-[300px] overflow-auto">
+          <CodeBlock code={scriptCode} language="python" showLineNumbers>
+            <CodeBlockHeader>
+              <span className="text-[10px] font-mono">quality_check.py</span>
               <CodeBlockActions>
                 <CodeBlockCopyButton className="h-6 w-6" />
               </CodeBlockActions>
