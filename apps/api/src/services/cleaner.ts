@@ -20,11 +20,15 @@ const CLEANING_SYSTEM_PROMPT = `You are a data cleaning expert. Given column pro
 Analyze each column and decide what transformations are needed. You have FULL FREEDOM — use any pandas/numpy operation.
 
 CRITICAL RULES:
+- Use the EXACT column names from the profile data. Access them via df.columns — NEVER hardcode expected column names or create an "expected columns" list.
+- NEVER rename columns or normalize column names. Work with whatever names exist in df.
+- NEVER create new columns that duplicate existing data. Only add derived columns (flags, parsed versions).
 - NEVER use df.dropna() or df = df.dropna(subset=[...]) to handle nulls. This drops rows and causes data loss.
 - For nulls: use fillna() with appropriate values (median, mean, mode, 0, "unknown", etc.), interpolation, or flag columns.
 - For date parsing: use pd.to_datetime with errors="coerce".
 - For type casting: use pd.to_numeric or .astype with error handling.
 - Preserve ALL rows unless there are true duplicates.
+- Before accessing any column by name, verify it exists: use \`if "col" in df.columns\` guards.
 
 Return a JSON object:
 {
@@ -35,8 +39,9 @@ Return a JSON object:
   "summary": "Brief overall explanation"
 }
 
-The script has access to: df (DataFrame), pd, np, json, log_step(step_num, column, action, rows_before, rows_after, warn="").
-Do NOT import anything or read/write files — that is handled by the framework.`;
+The script has access to: df (DataFrame already loaded), pd, np, json, log_step(step_num, column, action, rows_before, rows_after, warn="").
+Do NOT import anything or read/write files — that is handled by the framework.
+The column names in the profile below are the EXACT column names in df. Use them verbatim.`;
 
 export async function generateCleaningPlan(
   sourceFileId: string,
@@ -95,6 +100,12 @@ export interface StepResult {
   warning?: string;
 }
 
+export interface PlaceholderAlert {
+  column: string;
+  fillValue: string;
+  percentage: number;
+}
+
 export interface CleaningResult {
   rowsBefore: number;
   rowsAfter: number;
@@ -103,6 +114,7 @@ export interface CleaningResult {
   steps: StepResult[];
   summary: Record<string, { before: string; after: string }>;
   script: string;
+  placeholderDominated: PlaceholderAlert[];
 }
 
 function sanitizeFilename(raw: string): string {
@@ -135,8 +147,21 @@ ${userScript}
 # ---- end cleaning logic ----
 
 rows_after = len(df)
+
+# Sanity check: detect if cleaning filled most values with placeholders
+_placeholder_patterns = ['unknown', 'UNKNOWN', 'missing', 'MISSING', 'N/A', 'n/a', 'none', 'NONE']
+_bad_fill_cols = []
+for _col in df.columns:
+    if df[_col].dtype == 'object' or str(df[_col].dtype) == 'string':
+        _val_counts = df[_col].value_counts(normalize=True)
+        if len(_val_counts) > 0:
+            _top_val = str(_val_counts.index[0]).strip()
+            _top_pct = _val_counts.iloc[0]
+            if _top_pct > 0.8 and any(p in _top_val for p in _placeholder_patterns):
+                _bad_fill_cols.append({"column": _col, "fillValue": _top_val, "percentage": round(_top_pct * 100)})
+
 df.to_csv("${outputPath}", index=False)
-print(json.dumps({"type": "final", "rowsBefore": rows_before, "rowsAfter": rows_after, "columnsCleaned": len(step_results), "steps": step_results, "summary": summary}), flush=True)
+print(json.dumps({"type": "final", "rowsBefore": rows_before, "rowsAfter": rows_after, "columnsCleaned": len(step_results), "steps": step_results, "summary": summary, "placeholderDominated": _bad_fill_cols}), flush=True)
 `;
 }
 
@@ -222,6 +247,7 @@ ${script}
       columnsCleaned: number;
       steps?: StepResult[];
       summary: Record<string, { before: string; after: string }>;
+      placeholderDominated?: PlaceholderAlert[];
     };
 
     try {
@@ -254,6 +280,7 @@ ${script}
     return {
       ...cleanResult,
       steps: cleanResult.steps ?? [],
+      placeholderDominated: cleanResult.placeholderDominated ?? [],
       cleanedStoragePath: storageDest,
       script,
     };

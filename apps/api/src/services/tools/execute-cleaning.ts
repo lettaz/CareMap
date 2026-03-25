@@ -1,9 +1,10 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { executeCleaning, type StepResult } from "../cleaner.js";
+import { executeCleaning, type StepResult, type PlaceholderAlert } from "../cleaner.js";
 import { logCorrection } from "../corrections.js";
 
 const CATASTROPHIC_DROP_THRESHOLD = 0.50;
+const PLACEHOLDER_COLUMN_THRESHOLD = 2;
 
 function findDestructiveSteps(steps: StepResult[]): StepResult[] {
   return steps.filter((s) => {
@@ -11,6 +12,10 @@ function findDestructiveSteps(steps: StepResult[]): StepResult[] {
     const dropRate = (s.rowsBefore - s.rowsAfter) / s.rowsBefore;
     return dropRate > CATASTROPHIC_DROP_THRESHOLD;
   });
+}
+
+function isPlaceholderCatastrophe(alerts: PlaceholderAlert[]): boolean {
+  return alerts.length >= PLACEHOLDER_COLUMN_THRESHOLD;
 }
 
 export const executeCleaningTool = tool({
@@ -48,8 +53,29 @@ export const executeCleaningTool = tool({
       const dropRate = result.rowsBefore > 0
         ? (result.rowsBefore - result.rowsAfter) / result.rowsBefore
         : 0;
-      const isCatastrophic = dropRate > CATASTROPHIC_DROP_THRESHOLD;
+      const rowDropCatastrophe = dropRate > CATASTROPHIC_DROP_THRESHOLD;
+      const placeholderCatastrophe = isPlaceholderCatastrophe(result.placeholderDominated);
+      const isCatastrophic = rowDropCatastrophe || placeholderCatastrophe;
       const destructiveSteps = findDestructiveSteps(result.steps);
+
+      let retryGuidance: string | undefined;
+      if (rowDropCatastrophe) {
+        retryGuidance =
+          `Cleaning dropped ${Math.round(dropRate * 100)}% of rows (${result.rowsBefore} → ${result.rowsAfter}). ` +
+          `The destructive step(s): ${destructiveSteps.map((s) => `step ${s.step} (${s.action} on "${s.column}" dropped ${s.rowsBefore} → ${s.rowsAfter})`).join("; ")}. ` +
+          `Rewrite your script to avoid row loss. Use fillna(), interpolation, or sentinel values instead of dropna(). ` +
+          `Do NOT ask the user — fix this automatically.`;
+      } else if (placeholderCatastrophe) {
+        const badCols = result.placeholderDominated.map(
+          (a) => `"${a.column}" is ${a.percentage}% "${a.fillValue}"`,
+        ).join("; ");
+        retryGuidance =
+          `Cleaning produced placeholder-dominated data: ${badCols}. ` +
+          `This means the script likely referenced wrong column names or created new empty columns. ` +
+          `Use the EXACT column names from df.columns — do NOT hardcode expected names or create an expected columns list. ` +
+          `Print df.columns.tolist() first to verify names. ` +
+          `Do NOT ask the user — fix this automatically.`;
+      }
 
       return {
         success: true,
@@ -63,7 +89,8 @@ export const executeCleaningTool = tool({
         script: result.script,
         catastrophicDataLoss: isCatastrophic,
         ...(isCatastrophic && {
-          dropPercentage: Math.round(dropRate * 100),
+          dropPercentage: rowDropCatastrophe ? Math.round(dropRate * 100) : undefined,
+          placeholderDominatedColumns: placeholderCatastrophe ? result.placeholderDominated : undefined,
           destructiveSteps: destructiveSteps.map((s) => ({
             step: s.step,
             column: s.column,
@@ -72,11 +99,7 @@ export const executeCleaningTool = tool({
             rowsAfter: s.rowsAfter,
           })),
           autoRetryRecommended: true,
-          retryGuidance:
-            `Cleaning dropped ${Math.round(dropRate * 100)}% of rows (${result.rowsBefore} → ${result.rowsAfter}). ` +
-            `The destructive step(s): ${destructiveSteps.map((s) => `step ${s.step} (${s.action} on "${s.column}" dropped ${s.rowsBefore} → ${s.rowsAfter})`).join("; ")}. ` +
-            `Rewrite your script to avoid row loss. Use fillna(), interpolation, or sentinel values instead of dropna(). ` +
-            `Do NOT ask the user — fix this automatically.`,
+          retryGuidance,
         }),
       };
     } catch (err) {
