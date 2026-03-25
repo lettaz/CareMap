@@ -932,8 +932,8 @@ function CleaningPlanInline({
   const hasMore = plan.plan.length > 4;
 
   return (
-    <div className="border-b border-cm-border-primary shrink-0">
-      <div className="px-4 py-3 space-y-2.5">
+    <div className="border-b border-cm-border-primary shrink-0 max-h-[45vh] flex flex-col">
+      <div className="px-4 py-3 space-y-2.5 overflow-y-auto min-h-0 flex-1">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="flex h-5 w-5 items-center justify-center rounded bg-violet-100">
@@ -1012,7 +1012,9 @@ function CleaningPlanInline({
             </pre>
           </div>
         )}
+      </div>
 
+      <div className="px-4 py-2.5 shrink-0 border-t border-cm-border-subtle">
         <button
           type="button"
           onClick={onExecute}
