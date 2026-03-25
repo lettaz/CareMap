@@ -78,17 +78,23 @@ async function resolveNodeAcceptedMappingIds(projectId: string, nodeId: string):
 }
 
 async function hasActiveSchema(projectId: string, nodeId?: string): Promise<boolean> {
-  let query = supabase
-    .from("target_schemas")
-    .select("id")
-    .eq("project_id", projectId)
-    .eq("status", "active")
-    .limit(1);
+  const base = () =>
+    supabase
+      .from("target_schemas")
+      .select("id")
+      .eq("project_id", projectId)
+      .eq("status", "active")
+      .limit(1);
 
-  if (nodeId) query = query.eq("node_id", nodeId);
+  const { data } = nodeId
+    ? await base().eq("node_id", nodeId).maybeSingle()
+    : await base().maybeSingle();
 
-  const { data } = await query.maybeSingle();
-  return !!data;
+  if (data) return true;
+  if (!nodeId) return false;
+
+  const { data: fallback } = await base().is("node_id", null).maybeSingle();
+  return !!fallback;
 }
 
 /**

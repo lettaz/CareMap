@@ -11,17 +11,22 @@ interface TargetTable {
 }
 
 async function getProjectSchema(projectId: string, nodeId?: string): Promise<string> {
-  let query = supabase
-    .from("target_schemas")
-    .select("tables")
-    .eq("project_id", projectId)
-    .eq("status", "active")
-    .order("version", { ascending: false })
-    .limit(1);
+  const base = () =>
+    supabase
+      .from("target_schemas")
+      .select("tables")
+      .eq("project_id", projectId)
+      .eq("status", "active")
+      .order("version", { ascending: false })
+      .limit(1);
 
-  if (nodeId) query = query.eq("node_id", nodeId);
+  let { data } = nodeId
+    ? await base().eq("node_id", nodeId).maybeSingle()
+    : await base().maybeSingle();
 
-  const { data } = await query.maybeSingle();
+  if (!data && nodeId) {
+    ({ data } = await base().is("node_id", null).maybeSingle());
+  }
 
   if (!data) {
     throw new Error(
