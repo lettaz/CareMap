@@ -1,16 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { executeCleaning, type CleaningAction, type StepResult } from "../cleaner.js";
-import { logBulkCorrections } from "../corrections.js";
+import { executeCleaning, type StepResult } from "../cleaner.js";
+import { logCorrection } from "../corrections.js";
 
 const CATASTROPHIC_DROP_THRESHOLD = 0.50;
-
-const cleaningActionSchema = z.object({
-  column: z.string(),
-  action: z.enum(["parseDate", "fillNulls", "normalizeString", "castType", "deduplicateRows", "convertUnit"]),
-  params: z.record(z.unknown()).default({}),
-  reason: z.string(),
-});
 
 function findDestructiveSteps(steps: StepResult[]): StepResult[] {
   return steps.filter((s) => {
@@ -22,31 +15,35 @@ function findDestructiveSteps(steps: StepResult[]): StepResult[] {
 
 export const executeCleaningTool = tool({
   description:
-    "Apply the approved cleaning plan to a source file. Runs pandas transforms in an E2B sandbox " +
-    "and writes a cleaned file to Supabase Storage. The cleaned file is stored alongside the original; " +
-    "the original source is preserved. Returns per-step results so the user can see each action's impact. " +
-    "IMPORTANT: If the result has catastrophicDataLoss=true, you MUST automatically fix the problematic " +
-    "step(s) listed in destructiveSteps and re-run with corrected actions — do NOT just report it.",
+    "Execute a Python cleaning script on a source file in an E2B sandbox. " +
+    "The script receives a pre-loaded pandas DataFrame as `df` and numpy as `np`. " +
+    "It should transform `df` in place. A helper function `log_step(step_num, column, action, rows_before, rows_after, warn='')` " +
+    "is available to log per-step progress. The framework handles file I/O and storage. " +
+    "IMPORTANT: If the result has catastrophicDataLoss=true, you MUST analyze the issue, " +
+    "rewrite the script to avoid the row loss, and re-run — do NOT just report it.",
   inputSchema: z.object({
     projectId: z.string().uuid(),
     sourceFileId: z.string().uuid(),
-    actions: z.array(cleaningActionSchema),
+    script: z.string().describe(
+      "Python pandas/numpy code that transforms `df` in place. " +
+      "Use log_step() to report each transformation step. " +
+      "NEVER drop rows to handle nulls — use fillna, interpolation, or flagging instead.",
+    ),
+    description: z.string().describe("Human-readable summary of what this cleaning script does"),
   }),
   needsApproval: false,
-  execute: async ({ projectId, sourceFileId, actions }) => {
+  execute: async ({ projectId, sourceFileId, script, description }) => {
     try {
-      const result = await executeCleaning(projectId, sourceFileId, actions as CleaningAction[]);
+      const result = await executeCleaning(projectId, sourceFileId, script);
 
-      await logBulkCorrections(
-        actions.map((a) => ({
-          projectId,
-          action: "value_fix" as const,
-          description: `${a.action} on column "${a.column}": ${a.reason}`,
-          sourceFileId,
-          field: a.column,
-          appliedBy: "ai" as const,
-        })),
-      );
+      await logCorrection({
+        projectId,
+        action: "value_fix",
+        description,
+        sourceFileId,
+        field: "*",
+        appliedBy: "ai",
+      });
 
       const dropRate = result.rowsBefore > 0
         ? (result.rowsBefore - result.rowsAfter) / result.rowsBefore
@@ -78,8 +75,7 @@ export const executeCleaningTool = tool({
           retryGuidance:
             `Cleaning dropped ${Math.round(dropRate * 100)}% of rows (${result.rowsBefore} → ${result.rowsAfter}). ` +
             `The destructive step(s): ${destructiveSteps.map((s) => `step ${s.step} (${s.action} on "${s.column}" dropped ${s.rowsBefore} → ${s.rowsAfter})`).join("; ")}. ` +
-            `You MUST re-run execute_cleaning with corrected actions: either remove the problematic step, change its strategy ` +
-            `(e.g., fillNulls with strategy="median" instead of strategy="drop"), or use a softer approach. ` +
+            `Rewrite your script to avoid row loss. Use fillna(), interpolation, or sentinel values instead of dropna(). ` +
             `Do NOT ask the user — fix this automatically.`,
         }),
       };
@@ -92,8 +88,8 @@ export const executeCleaningTool = tool({
         sourceFileId,
         retryable: isRetryable,
         suggestion: isRetryable
-          ? "This was a transient sandbox failure. Try calling execute_cleaning again with the same parameters."
-          : "Check the cleaning actions for invalid column names or incompatible transformations.",
+          ? "Transient sandbox failure. Try calling execute_cleaning again."
+          : "Check the script for syntax errors or incorrect column names.",
       };
     }
   },

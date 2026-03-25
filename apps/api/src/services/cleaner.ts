@@ -2,13 +2,6 @@ import { supabase } from "../config/supabase.js";
 import { createSandbox, getSignedFileUrls, buildFileDownloadPreamble } from "./sandbox.js";
 import { cleanedPath, uploadFile } from "./storage.js";
 
-export interface CleaningAction {
-  column: string;
-  action: "parseDate" | "fillNulls" | "normalizeString" | "castType" | "deduplicateRows" | "convertUnit";
-  params: Record<string, unknown>;
-  reason: string;
-}
-
 export interface StepResult {
   step: number;
   column: string;
@@ -28,46 +21,6 @@ export interface CleaningResult {
   script: string;
 }
 
-const ROW_DROP_WARN_THRESHOLD = 0.05;
-
-const ACTION_TEMPLATES: Record<CleaningAction["action"], (col: string, params: Record<string, unknown>) => string> = {
-  parseDate: (col, params) => {
-    const fmt = params.format ? `, format="${params.format}"` : "";
-    return `df["${col}"] = pd.to_datetime(df["${col}"], errors="coerce"${fmt})`;
-  },
-  fillNulls: (col, params) => {
-    const strategy = (params.strategy as string) ?? "drop";
-    if (strategy === "drop") return `df = df.dropna(subset=["${col}"])`;
-    if (strategy === "mean") return `df["${col}"] = df["${col}"].fillna(df["${col}"].mean())`;
-    if (strategy === "median") return `df["${col}"] = df["${col}"].fillna(df["${col}"].median())`;
-    if (strategy === "mode") return `df["${col}"] = df["${col}"].fillna(df["${col}"].mode()[0])`;
-    if (strategy === "value") return `df["${col}"] = df["${col}"].fillna(${JSON.stringify(params.value)})`;
-    return `df = df.dropna(subset=["${col}"])`;
-  },
-  normalizeString: (col) =>
-    `df["${col}"] = df["${col}"].astype(str).str.strip().str.lower()`,
-  castType: (col, params) => {
-    const target = params.type as string;
-    if (target === "number") return `df["${col}"] = pd.to_numeric(df["${col}"], errors="coerce")`;
-    if (target === "string") return `df["${col}"] = df["${col}"].astype(str)`;
-    if (target === "boolean") return `df["${col}"] = df["${col}"].astype(bool)`;
-    return `df["${col}"] = df["${col}"].astype("${target}")`;
-  },
-  deduplicateRows: (_col, params) => {
-    const cols = (params.columns as string[]) ?? [];
-    const subset = cols.length > 0 ? `subset=${JSON.stringify(cols)}` : "";
-    return `df = df.drop_duplicates(${subset})`;
-  },
-  convertUnit: (col, params) =>
-    `df["${col}"] = df["${col}"] * ${params.factor ?? 1}`,
-};
-
-export function getActionCode(action: CleaningAction): string {
-  const template = ACTION_TEMPLATES[action.action];
-  if (!template) return `# Unsupported action: ${action.action}`;
-  return template(action.column, action.params);
-}
-
 function sanitizeFilename(raw: string): string {
   return raw
     .replace(/\.(csv|parquet|xlsx|json|txt)$/i, "")
@@ -75,54 +28,38 @@ function sanitizeFilename(raw: string): string {
     .toLowerCase();
 }
 
-export function buildCleaningScript(
-  actions: CleaningAction[],
+export function wrapCleaningScript(
+  userScript: string,
   inputFilename: string,
   outputPath: string,
 ): string {
-  const lines = [
-    "import pandas as pd",
-    "import json, sys",
-    "",
-    `df = pd.read_csv("/tmp/data/${inputFilename}") if "${inputFilename}".endswith(".csv") else pd.read_parquet("/tmp/data/${inputFilename}")`,
-    `rows_before = len(df)`,
-    `summary = {}`,
-    `step_results = []`,
-    "",
-  ];
+  return `import pandas as pd
+import numpy as np
+import json, sys
 
-  for (let i = 0; i < actions.length; i++) {
-    const action = actions[i];
-    const template = ACTION_TEMPLATES[action.action];
-    if (!template) continue;
+df = pd.read_csv("/tmp/data/${inputFilename}") if "${inputFilename}".endswith(".csv") else pd.read_parquet("/tmp/data/${inputFilename}")
+rows_before = len(df)
+step_results = []
+summary = {}
 
-    lines.push(`# Step ${i + 1}: ${action.action} on ${action.column}`);
-    lines.push(`# ${action.reason}`);
-    lines.push(`_step_rows_before = len(df)`);
-    lines.push(`_before = df["${action.column}"].describe().to_dict() if "${action.column}" in df.columns else {}`);
-    lines.push(template(action.column, action.params));
-    lines.push(`_step_rows_after = len(df)`);
-    lines.push(`_after = df["${action.column}"].describe().to_dict() if "${action.column}" in df.columns else {}`);
-    lines.push(`summary["${action.column}"] = {"before": str(_before), "after": str(_after)}`);
-    lines.push(`_step_warn = ""`);
-    lines.push(`if _step_rows_before > 0 and (_step_rows_before - _step_rows_after) / _step_rows_before > ${ROW_DROP_WARN_THRESHOLD}:`);
-    lines.push(`    _step_warn = f"Row count dropped by {_step_rows_before - _step_rows_after} ({((_step_rows_before - _step_rows_after) / _step_rows_before * 100):.1f}%)"`);
-    lines.push(`step_results.append({"step": ${i + 1}, "column": "${action.column}", "action": "${action.action}", "rowsBefore": _step_rows_before, "rowsAfter": _step_rows_after, "warning": _step_warn})`);
-    lines.push(`print(json.dumps({"type": "step_complete", **step_results[-1]}), flush=True)`);
-    lines.push("");
-  }
+def log_step(step_num, column, action, rows_before_step, rows_after_step, warn=""):
+    step_results.append({"step": step_num, "column": column, "action": action, "rowsBefore": rows_before_step, "rowsAfter": rows_after_step, "warning": warn})
+    print(json.dumps({"type": "step_complete", **step_results[-1]}), flush=True)
 
-  lines.push(`df.to_csv("${outputPath}", index=False)`);
-  lines.push(`rows_after = len(df)`);
-  lines.push(`print(json.dumps({"type": "final", "rowsBefore": rows_before, "rowsAfter": rows_after, "columnsCleaned": ${actions.length}, "steps": step_results, "summary": summary}), flush=True)`);
+# ---- LLM-generated cleaning logic ----
+${userScript}
+# ---- end cleaning logic ----
 
-  return lines.join("\n");
+rows_after = len(df)
+df.to_csv("${outputPath}", index=False)
+print(json.dumps({"type": "final", "rowsBefore": rows_before, "rowsAfter": rows_after, "columnsCleaned": len(step_results), "steps": step_results, "summary": summary}), flush=True)
+`;
 }
 
 export async function executeCleaning(
   projectId: string,
   sourceFileId: string,
-  actions: CleaningAction[],
+  userScript: string,
   onProgress?: (line: string) => void,
 ): Promise<CleaningResult> {
   const { data: sourceFile } = await supabase
@@ -145,7 +82,7 @@ export async function executeCleaning(
   const preamble = buildFileDownloadPreamble(fileUrls);
 
   const outputFilePath = `/tmp/output/cleaned_${downloadName}`;
-  const script = buildCleaningScript(actions, downloadName, outputFilePath);
+  const script = wrapCleaningScript(userScript, downloadName, outputFilePath);
 
   const fullCode = `
 ${preamble}

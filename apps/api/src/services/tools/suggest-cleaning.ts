@@ -3,10 +3,11 @@ import { z } from "zod";
 import { getModel } from "../../config/ai.js";
 import { generateText } from "ai";
 import { supabase } from "../../config/supabase.js";
-import { getActionCode, type CleaningAction } from "../cleaner.js";
 
 export const suggestCleaningTool = tool({
-  description: "Given source profiles with quality flags, propose a structured cleaning plan with specific actions per column. Returns actions list with Python code previews for user review before execution.",
+  description:
+    "Analyze source column profiles and propose a cleaning plan with a ready-to-execute Python script. " +
+    "Returns a human-readable plan and a pandas script for execute_cleaning.",
   inputSchema: z.object({
     sourceFileId: z.string().uuid(),
   }),
@@ -22,7 +23,9 @@ export const suggestCleaningTool = tool({
       column: p.column_name,
       type: p.inferred_type,
       qualityFlags: p.quality_flags,
-      sampleValues: p.sample_values?.slice(0, 3),
+      nullCount: (p.native_stats as Record<string, unknown>)?.nullCount,
+      totalCount: (p.native_stats as Record<string, unknown>)?.count,
+      sampleValues: p.sample_values?.slice(0, 5),
       confidence: p.confidence,
     }));
 
@@ -31,19 +34,28 @@ export const suggestCleaningTool = tool({
       messages: [
         {
           role: "system",
-          content: `You are a data cleaning assistant. Given column profiles with quality flags, propose a structured cleaning plan.
+          content: `You are a data cleaning expert. Given column profiles with quality flags, propose a cleaning plan.
 
-For each column that needs cleaning, output a JSON action:
+Analyze each column and decide what transformations are needed. You have FULL FREEDOM — use any pandas/numpy operation.
+
+CRITICAL RULES:
+- NEVER use df.dropna() or df = df.dropna(subset=[...]) to handle nulls. This drops rows and causes data loss.
+- For nulls: use fillna() with appropriate values (median, mean, mode, 0, "unknown", etc.), interpolation, or flag columns.
+- For date parsing: use pd.to_datetime with errors="coerce".
+- For type casting: use pd.to_numeric or .astype with error handling.
+- Preserve ALL rows unless there are true duplicates.
+
+Return a JSON object:
 {
-  "column": "column_name",
-  "action": "parseDate" | "fillNulls" | "normalizeString" | "castType" | "deduplicateRows" | "convertUnit",
-  "params": { ... },
-  "reason": "Why this action is needed"
+  "plan": [
+    { "column": "col_name", "issue": "description of the issue", "fix": "what will be done", "impact": "expected result" }
+  ],
+  "script": "Python pandas/numpy code that transforms df in place. Use log_step(step_num, col, action, len(df), len(df)) to report each step.",
+  "summary": "Brief overall explanation"
 }
 
-For fillNulls, specify params.strategy ("drop" | "mean" | "median" | "mode" | "value") and params.value if strategy is "value".
-Only propose actions for columns that genuinely need cleaning.
-Return a JSON object: { "actions": [...], "summary": "Brief explanation" }`,
+The script has access to: df (DataFrame), pd, np, json, log_step(step_num, column, action, rows_before, rows_after, warn="").
+Do NOT import anything or read/write files — that is handled by the framework.`,
         },
         {
           role: "user",
@@ -55,21 +67,17 @@ Return a JSON object: { "actions": [...], "summary": "Brief explanation" }`,
 
     const jsonStr = text.replace(/```json\n?|\n?```/g, "").trim();
     const result = JSON.parse(jsonStr) as {
-      actions: Array<{ column: string; action: string; params: Record<string, unknown>; reason: string }>;
+      plan: Array<{ column: string; issue: string; fix: string; impact: string }>;
+      script: string;
       summary: string;
     };
 
-    const actionsWithCode = result.actions.map((a, i) => ({
-      ...a,
-      step: i + 1,
-      code: getActionCode(a as CleaningAction),
-    }));
-
     return {
       sourceFileId,
-      actions: actionsWithCode,
+      plan: result.plan,
+      script: result.script,
       summary: result.summary,
-      actionCount: result.actions.length,
+      actionCount: result.plan.length,
     };
   },
 });

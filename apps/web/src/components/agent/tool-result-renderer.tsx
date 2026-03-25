@@ -260,10 +260,15 @@ function PipelineResult({ data, toolName }: { data: Record<string, unknown>; too
       )}
 
       {showScript && scriptCode && (
-        <div className="border-t border-green-100 max-h-[200px] overflow-auto bg-cm-bg-elevated/30">
-          <pre className="text-[10px] leading-relaxed text-cm-text-secondary font-mono whitespace-pre-wrap break-all p-3">
-            {scriptCode}
-          </pre>
+        <div className="border-t border-green-100 max-h-[300px] overflow-auto">
+          <CodeBlock code={scriptCode} language="python" showLineNumbers>
+            <CodeBlockHeader>
+              <span className="text-[10px] font-mono">cleaning.py</span>
+              <CodeBlockActions>
+                <CodeBlockCopyButton className="h-6 w-6" />
+              </CodeBlockActions>
+            </CodeBlockHeader>
+          </CodeBlock>
         </div>
       )}
 
@@ -1259,29 +1264,19 @@ function renderChart(spec: ChartSpec) {
   }
 }
 
-const ACTION_ICONS: Record<string, string> = {
-  parseDate: "Calendar",
-  fillNulls: "Fill missing values",
-  normalizeString: "Standardize text",
-  castType: "Convert type",
-  deduplicateRows: "Remove duplicates",
-  convertUnit: "Convert units",
-};
-
 function CleaningPlanResult({ data }: { data: Record<string, unknown> }) {
-  const actions = data.actions as Array<{
-    step?: number;
+  const plan = data.plan as Array<{
     column: string;
-    action: string;
-    params?: Record<string, unknown>;
-    reason: string;
-    code?: string;
+    issue: string;
+    fix: string;
+    impact: string;
   }> | undefined;
+  const scriptCode = data.script as string | undefined;
   const summary = data.summary as string | undefined;
-  const actionCount = (data.actionCount as number) ?? actions?.length ?? 0;
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const actionCount = (data.actionCount as number) ?? plan?.length ?? 0;
+  const [showScript, setShowScript] = useState(false);
 
-  if (!actions?.length) {
+  if (!plan?.length) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-xs text-green-700">
         <CheckCircle2 className="h-4 w-4 shrink-0" />
@@ -1306,83 +1301,54 @@ function CleaningPlanResult({ data }: { data: Record<string, unknown> }) {
             </p>
           </div>
         </div>
-        {summary && (
-          <span className="max-w-[180px] truncate rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-cm-text-secondary">
-            {summary}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {summary && (
+            <span className="max-w-[180px] truncate rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-cm-text-secondary">
+              {summary}
+            </span>
+          )}
+          {scriptCode && (
+            <button
+              type="button"
+              onClick={() => setShowScript(!showScript)}
+              className="text-[10px] text-cm-accent hover:underline flex items-center gap-1"
+            >
+              <FileCode2 className="h-2.5 w-2.5" />
+              {showScript ? "Hide script" : "View script"}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="divide-y divide-cm-border-subtle">
-        {actions.map((action, i) => {
-          const isExpanded = expandedIdx === i;
-          const actionLabel = ACTION_ICONS[action.action] ?? action.action.replace(/([A-Z])/g, " $1").trim();
-
-          return (
-            <div key={i}>
-              <button
-                type="button"
-                onClick={() => setExpandedIdx(isExpanded ? null : i)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-cm-bg-elevated/50 transition-colors"
-              >
-                {isExpanded
-                  ? <ChevronDown className="h-3 w-3 text-cm-text-tertiary shrink-0" />
-                  : <ChevronRight className="h-3 w-3 text-cm-text-tertiary shrink-0" />}
-
-                <span className="flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-[9px] font-bold text-amber-700 shrink-0">
-                  {action.step ?? i + 1}
-                </span>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono text-[11px] font-medium text-cm-text-primary">
-                      {action.column}
-                    </span>
-                    <span className="rounded bg-cm-bg-elevated px-1.5 py-0.5 text-[10px] text-cm-text-tertiary capitalize">
-                      {actionLabel}
-                    </span>
-                  </div>
-                </div>
-              </button>
-
-              {isExpanded && (
-                <div className="bg-cm-bg-elevated/40 px-3 pb-2.5 pl-10 space-y-2">
-                  <p className="text-[11px] text-cm-text-secondary leading-relaxed">
-                    {action.reason}
-                  </p>
-
-                  {action.code && (
-                    <div className="rounded-md overflow-hidden border border-cm-border-subtle">
-                      <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-800 text-[9px] text-slate-400 font-medium">
-                        <span>Python</span>
-                      </div>
-                      <pre className="px-2.5 py-2 bg-slate-900 text-[10px] text-slate-200 font-mono leading-relaxed overflow-x-auto">
-                        {action.code}
-                      </pre>
-                    </div>
-                  )}
-
-                  {action.params && Object.keys(action.params).length > 0 && (
-                    <div className="rounded-md border border-cm-border-subtle bg-cm-bg-surface p-2">
-                      <p className="text-[9px] font-medium uppercase tracking-wide text-cm-text-tertiary mb-1">
-                        Parameters
-                      </p>
-                      <div className="space-y-0.5">
-                        {Object.entries(action.params).map(([key, val]) => (
-                          <div key={key} className="flex items-center gap-2 text-[10px]">
-                            <span className="font-mono text-cm-text-tertiary">{key}:</span>
-                            <span className="text-cm-text-primary">{String(val)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+        {plan.map((item, i) => (
+          <div key={i} className="px-3 py-2 flex items-start gap-2.5">
+            <span className="flex h-5 w-5 items-center justify-center rounded bg-amber-100 text-[9px] font-bold text-amber-700 shrink-0 mt-0.5">
+              {i + 1}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[11px] font-medium text-cm-text-primary">{item.column}</span>
+                <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] text-red-600">{item.issue}</span>
+              </div>
+              <p className="text-[10px] text-cm-text-secondary mt-0.5">{item.fix}</p>
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
+
+      {showScript && scriptCode && (
+        <div className="border-t border-cm-border-subtle max-h-[300px] overflow-auto">
+          <CodeBlock code={scriptCode} language="python" showLineNumbers>
+            <CodeBlockHeader>
+              <span className="text-[10px] font-mono">cleaning_plan.py</span>
+              <CodeBlockActions>
+                <CodeBlockCopyButton className="h-6 w-6" />
+              </CodeBlockActions>
+            </CodeBlockHeader>
+          </CodeBlock>
+        </div>
+      )}
     </div>
   );
 }
