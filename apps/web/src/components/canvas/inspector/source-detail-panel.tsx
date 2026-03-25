@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { usePipelineStore } from "@/lib/stores/pipeline-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
-import { useProjectStore } from "@/lib/stores/project-store";
+
 import { useActiveProject } from "@/hooks/use-active-project";
 import { EditableLabel } from "@/components/shared/editable-label";
 import { SourceUploadZone } from "./source-upload-zone";
@@ -29,13 +29,27 @@ import type { SourcePreview, SourcePreviewColumn } from "@/lib/types";
 type PanelPhase = "upload" | "analyzing" | "preview";
 type DataView = "original" | "cleaned";
 
+export interface CleaningPlanItem {
+  column: string;
+  issue: string;
+  fix: string;
+  impact: string;
+}
+
+export interface CleaningPlanData {
+  plan: CleaningPlanItem[];
+  script: string;
+  summary: string;
+  actionCount: number;
+}
+
 interface SourceDetailPanelProps {
   nodeId: string;
 }
 
 interface AnalysisStep {
   label: string;
-  status: "pending" | "running" | "completed" | "error";
+  status: "pending" | "running" | "completed" | "error" | "failed";
 }
 
 function formatFileSize(bytes: number): string {
@@ -71,6 +85,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [sourceTab, setSourceTab] = useState<"data" | "ingestion">("data");
   const [dataView, setDataView] = useState<DataView>("original");
+  const [cleaningPlan, setCleaningPlan] = useState<CleaningPlanData | null>(null);
   const prevNodeId = useRef(nodeId);
 
   useEffect(() => {
@@ -80,6 +95,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
       setSampleRows(null);
       setCleanedSampleRows(null);
       setCleanedTotal(null);
+      setCleaningPlan(null);
       setShowIssuesOnly(false);
       setError(null);
       setDataView("original");
@@ -106,6 +122,15 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
     fetchDetailedProfile(sourceFileId)
       .then((p) => {
         setProfile(p);
+        if (p.cleaningPlan) {
+          const cp = p.cleaningPlan;
+          setCleaningPlan({
+            plan: cp.plan,
+            script: cp.script,
+            summary: cp.summary,
+            actionCount: cp.plan.length,
+          });
+        }
         if (p.status === "clean") {
           setBackendCleanStatus(true);
           if (projectId) {
@@ -148,6 +173,7 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
         { label: "Parsing columns", status: "pending" },
         { label: "Computing statistics", status: "pending" },
         { label: "AI interpretation", status: "pending" },
+        { label: "Generating cleaning plan", status: "pending" },
       ]);
 
       updateNodeData(projectId, nodeId, { label: file.name, status: "running" });
@@ -184,6 +210,12 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                     if (stepName.includes("interpret") && s.label.includes("AI")) {
                       return { ...s, status: stepStatus === "completed" ? "completed" : "running" };
                     }
+                    if (stepName.includes("suggest_cleaning") && s.label.includes("cleaning plan")) {
+                      const mapped = stepStatus === "completed" ? "completed"
+                        : stepStatus === "failed" ? "failed" as const
+                        : "running";
+                      return { ...s, status: mapped };
+                    }
                     return s;
                   }),
                 );
@@ -210,11 +242,13 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                 const sfId = capturedSourceFileId;
                 if (!sfId) break;
 
-                setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" as const })));
+                setSteps((prev) =>
+                  prev.map((s) =>
+                    s.label.includes("cleaning plan") ? s : { ...s, status: "completed" as const },
+                  ),
+                );
 
                 const suggestedLabel = (inner.suggestedLabel as string) ?? file.name.replace(/\.[^.]+$/, "");
-                const overallQuality = inner.overallQuality as string | undefined;
-                const avgConfidence = inner.avgConfidence as number | undefined;
 
                 updateNodeData(projectId, nodeId, {
                   status: "ready",
@@ -242,19 +276,13 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
                   .then((res) => setSampleRows(res.data))
                   .catch(() => {});
 
-                const thresholds = (projectSettings?.thresholds as Record<string, number>) ?? {};
-                const reviewThreshold = thresholds.review ?? 0.6;
-                const shouldSuggest =
-                  overallQuality === "poor" || (avgConfidence != null && avgConfidence < reviewThreshold);
-
-                if (shouldSuggest) {
-                  setPendingMessage({
-                    text: "Review the profile for this source and suggest a cleaning plan",
-                    mentions: [{ label: suggestedLabel, id: nodeId, sourceFileId: sfId, category: "source" }],
-                  });
-                } else {
-                  notifySourceReady(projectId, nodeId);
-                }
+                break;
+              }
+              case "cleaning_plan_ready": {
+                const plan = inner as unknown as CleaningPlanData;
+                setCleaningPlan(plan);
+                setSteps((prev) => prev.map((s) => ({ ...s, status: "completed" as const })));
+                notifySourceReady(projectId, nodeId);
                 break;
               }
               case "error": {
@@ -290,9 +318,6 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
   const isPanelOpen = useAgentStore((s) => s.isPanelOpen);
   const togglePanel = useAgentStore((s) => s.togglePanel);
   const setPendingMessage = useAgentStore((s) => s.setPendingMessage);
-  const projectSettings = useProjectStore(
-    (s) => s.projects.find((p) => p.id === projectId)?.settings as Record<string, unknown> | undefined,
-  );
 
   const preview = useMemo<SourcePreview | null>(() => {
     if (!profile) return null;
@@ -393,6 +418,23 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
     notifySourceReady(projectId, nodeId);
     toast.success("Cleaned dataset set as default for downstream nodes");
   }, [projectId, nodeId, sourceFileId, updateNodeData, notifySourceReady]);
+
+  const handleExecuteCleaningPlan = useCallback(() => {
+    if (!projectId || !sourceFileId || !node || !cleaningPlan) return;
+
+    const scriptBlock = "```python\n" + cleaningPlan.script + "\n```";
+    setPendingMessage({
+      text: `Execute the following cleaning script for this source. Use execute_cleaning with this exact script — do NOT call suggest_cleaning again.\n\n${scriptBlock}`,
+      mentions: [{
+        label: node.data.label,
+        id: nodeId,
+        sourceFileId,
+        category: "source",
+      }],
+    });
+    selectNode(projectId, null);
+    if (!isPanelOpen) togglePanel();
+  }, [projectId, nodeId, sourceFileId, node, cleaningPlan, setPendingMessage, selectNode, isPanelOpen, togglePanel]);
 
   const handleQualityCheck = useCallback(() => {
     if (!projectId || !sourceFileId || !node) return;
@@ -498,9 +540,16 @@ export function SourceDetailPanel({ nodeId }: SourceDetailPanelProps) {
           <SourceSummaryBar
             preview={preview}
             onAiClick={handleOpenChat}
-            onRequestCleanup={handleRequestCleanup}
-            showCleanupCta={!hasCleanedVersion || dataView === "original"}
+            cleaningPlanReady={!!cleaningPlan && !hasCleanedVersion}
           />
+
+          {cleaningPlan && !hasCleanedVersion && dataView === "original" && (
+            <CleaningPlanInline
+              plan={cleaningPlan}
+              onExecute={handleExecuteCleaningPlan}
+              onRegenerate={handleRequestCleanup}
+            />
+          )}
 
           {hasCleanedVersion && (
             <div className="flex items-center gap-1 border-b border-cm-border-primary px-4 shrink-0">
@@ -852,6 +901,116 @@ function CleanedDataView({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CleaningPlanInline({
+  plan,
+  onExecute,
+  onRegenerate,
+}: {
+  plan: CleaningPlanData;
+  onExecute: () => void;
+  onRegenerate: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [showScript, setShowScript] = useState(false);
+
+  const visibleItems = expanded ? plan.plan : plan.plan.slice(0, 4);
+  const hasMore = plan.plan.length > 4;
+
+  return (
+    <div className="border-b border-cm-border-primary shrink-0">
+      <div className="px-4 py-3 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-5 w-5 items-center justify-center rounded bg-violet-100">
+              <Sparkles className="h-3 w-3 text-violet-600" />
+            </div>
+            <span className="text-xs font-semibold text-cm-text-primary">
+              Cleaning Plan
+            </span>
+            <span className="text-[10px] text-cm-text-tertiary">
+              {plan.actionCount} fix{plan.actionCount !== 1 ? "es" : ""} proposed
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowScript(!showScript)}
+              className="text-[10px] text-cm-accent hover:underline"
+            >
+              {showScript ? "Hide script" : "View script"}
+            </button>
+            <button
+              type="button"
+              onClick={onRegenerate}
+              className="text-[10px] text-cm-text-tertiary hover:text-cm-text-secondary"
+            >
+              Regenerate
+            </button>
+          </div>
+        </div>
+
+        <p className="text-[11px] text-cm-text-secondary leading-relaxed">{plan.summary}</p>
+
+        <div className="space-y-1">
+          {visibleItems.map((item, i) => (
+            <div
+              key={`${item.column}-${i}`}
+              className="flex items-start gap-2 rounded-md bg-cm-bg-elevated px-2.5 py-1.5"
+            >
+              <span className="text-[10px] font-medium text-cm-text-tertiary shrink-0 w-4 text-right tabular-nums mt-px">
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-[10px] font-medium text-cm-text-primary">{item.column}</span>
+                  <span className="text-[10px] text-cm-warning">{item.issue}</span>
+                </div>
+                <p className="text-[10px] text-cm-text-secondary mt-0.5">{item.fix}</p>
+              </div>
+            </div>
+          ))}
+
+          {hasMore && !expanded && (
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="w-full text-center text-[10px] text-cm-accent hover:underline py-1"
+            >
+              Show {plan.plan.length - 4} more
+            </button>
+          )}
+          {hasMore && expanded && (
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              className="w-full text-center text-[10px] text-cm-text-tertiary hover:text-cm-text-secondary py-1"
+            >
+              Show less
+            </button>
+          )}
+        </div>
+
+        {showScript && (
+          <div className="rounded-md border border-cm-border-primary bg-cm-bg-elevated max-h-[200px] overflow-auto">
+            <pre className="text-[10px] leading-relaxed text-cm-text-secondary font-mono whitespace-pre-wrap break-all p-2.5">
+              {plan.script}
+            </pre>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={onExecute}
+          className="flex w-full items-center justify-center gap-2 rounded-md bg-cm-accent px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-cm-accent/90 active:scale-[0.99]"
+        >
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Execute cleanup
+        </button>
+      </div>
     </div>
   );
 }

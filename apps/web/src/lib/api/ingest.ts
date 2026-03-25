@@ -25,6 +25,11 @@ export interface DetailedProfileDTO {
     nativeStats: Record<string, unknown>;
     llmInterpretation: Record<string, unknown>;
   }>;
+  cleaningPlan?: {
+    plan: Array<{ column: string; issue: string; fix: string; impact: string }>;
+    script: string;
+    summary: string;
+  } | null;
 }
 
 export function fetchProfile(sourceFileId: string): Promise<ColumnProfileDTO[]> {

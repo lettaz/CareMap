@@ -1,6 +1,81 @@
+import { generateText } from "ai";
 import { supabase } from "../config/supabase.js";
+import { getModel } from "../config/ai.js";
 import { createSandbox, getSignedFileUrls, buildFileDownloadPreamble } from "./sandbox.js";
 import { cleanedPath, uploadFile } from "./storage.js";
+
+export interface CleaningPlan {
+  plan: Array<{ column: string; issue: string; fix: string; impact: string }>;
+  script: string;
+  summary: string;
+}
+
+export interface CleaningPlanResult extends CleaningPlan {
+  sourceFileId: string;
+  actionCount: number;
+}
+
+const CLEANING_SYSTEM_PROMPT = `You are a data cleaning expert. Given column profiles with quality flags, propose a cleaning plan.
+
+Analyze each column and decide what transformations are needed. You have FULL FREEDOM — use any pandas/numpy operation.
+
+CRITICAL RULES:
+- NEVER use df.dropna() or df = df.dropna(subset=[...]) to handle nulls. This drops rows and causes data loss.
+- For nulls: use fillna() with appropriate values (median, mean, mode, 0, "unknown", etc.), interpolation, or flag columns.
+- For date parsing: use pd.to_datetime with errors="coerce".
+- For type casting: use pd.to_numeric or .astype with error handling.
+- Preserve ALL rows unless there are true duplicates.
+
+Return a JSON object:
+{
+  "plan": [
+    { "column": "col_name", "issue": "description of the issue", "fix": "what will be done", "impact": "expected result" }
+  ],
+  "script": "Python pandas/numpy code that transforms df in place. Use log_step(step_num, col, action, len(df), len(df)) to report each step.",
+  "summary": "Brief overall explanation"
+}
+
+The script has access to: df (DataFrame), pd, np, json, log_step(step_num, column, action, rows_before, rows_after, warn="").
+Do NOT import anything or read/write files — that is handled by the framework.`;
+
+export async function generateCleaningPlan(sourceFileId: string): Promise<CleaningPlanResult> {
+  const { data: profiles } = await supabase
+    .from("source_profiles")
+    .select()
+    .eq("source_file_id", sourceFileId);
+
+  if (!profiles?.length) throw new Error("No profiles found for source file");
+
+  const profileSummary = profiles.map((p) => ({
+    column: p.column_name,
+    type: p.inferred_type,
+    qualityFlags: p.quality_flags,
+    nullCount: (p.native_stats as Record<string, unknown>)?.nullCount,
+    totalCount: (p.native_stats as Record<string, unknown>)?.count,
+    sampleValues: p.sample_values?.slice(0, 5),
+    confidence: p.confidence,
+  }));
+
+  const { text } = await generateText({
+    model: getModel(),
+    messages: [
+      { role: "system", content: CLEANING_SYSTEM_PROMPT },
+      { role: "user", content: `Column profiles:\n${JSON.stringify(profileSummary, null, 2)}` },
+    ],
+    temperature: 0.1,
+  });
+
+  const jsonStr = text.replace(/```json\n?|\n?```/g, "").trim();
+  const result = JSON.parse(jsonStr) as CleaningPlan;
+
+  return {
+    sourceFileId,
+    plan: result.plan,
+    script: result.script,
+    summary: result.summary,
+    actionCount: result.plan.length,
+  };
+}
 
 export interface StepResult {
   step: number;

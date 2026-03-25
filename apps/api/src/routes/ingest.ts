@@ -118,7 +118,7 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
     const { sourceFileId } = request.params;
 
     const [fileResult, profileResult] = await Promise.all([
-      supabase.from("source_files").select("raw_profile, filename, row_count, column_count, status").eq("id", sourceFileId).single(),
+      supabase.from("source_files").select("raw_profile, filename, row_count, column_count, status, cleaning_plan").eq("id", sourceFileId).single(),
       supabase.from("source_profiles").select().eq("source_file_id", sourceFileId).order("column_name"),
     ]);
 
@@ -167,6 +167,7 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       status: fileResult.data.status,
       summary: rawProfile?.summary ?? null,
       columns,
+      cleaningPlan: fileResult.data.cleaning_plan ?? null,
     };
   });
 

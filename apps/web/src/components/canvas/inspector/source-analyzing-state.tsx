@@ -2,7 +2,7 @@ import { Loader2, FileSpreadsheet } from "lucide-react";
 
 interface AnalysisStepData {
   label: string;
-  status: "pending" | "running" | "completed" | "error";
+  status: "pending" | "running" | "completed" | "error" | "failed";
 }
 
 interface SourceAnalyzingStateProps {
@@ -72,7 +72,7 @@ function AnalysisStep({
   status,
 }: {
   label: string;
-  status: "pending" | "running" | "completed" | "error";
+  status: "pending" | "running" | "completed" | "error" | "failed";
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -88,9 +88,9 @@ function AnalysisStep({
           <Loader2 className="h-4 w-4 animate-spin text-cm-accent" />
         </div>
       )}
-      {status === "error" && (
-        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-red-100">
-          <span className="text-xs text-red-600">!</span>
+      {(status === "error" || status === "failed") && (
+        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100">
+          <span className="text-xs text-amber-600">!</span>
         </div>
       )}
       {status === "pending" && (
@@ -104,12 +104,12 @@ function AnalysisStep({
             ? "text-cm-text-secondary"
             : status === "running"
               ? "text-cm-text-primary font-medium"
-              : status === "error"
-                ? "text-red-600"
+              : status === "error" || status === "failed"
+                ? "text-amber-600"
                 : "text-cm-text-tertiary"
         }`}
       >
-        {label}
+        {label}{status === "failed" ? " (skipped)" : ""}
       </span>
     </div>
   );

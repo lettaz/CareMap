@@ -2,6 +2,7 @@ import { supabase } from "../config/supabase.js";
 import { parseCsv, parseExcel, profileColumns, saveProfiles } from "./profiler.js";
 import { uploadFile, rawPath } from "./storage.js";
 import { logStep } from "../lib/step-logger.js";
+import { generateCleaningPlan } from "./cleaner.js";
 
 export interface IngestOptions {
   projectId: string;
@@ -20,6 +21,12 @@ export interface IngestResult {
   overallQuality: string;
   avgConfidence: number;
   criticalFlagCount: number;
+  cleaningPlan: {
+    plan: Array<{ column: string; issue: string; fix: string; impact: string }>;
+    script: string;
+    summary: string;
+    actionCount: number;
+  } | null;
 }
 
 export async function ingestBuffer(opts: IngestOptions): Promise<IngestResult> {
@@ -177,6 +184,44 @@ export async function ingestBuffer(opts: IngestOptions): Promise<IngestResult> {
     criticalFlagCount,
   });
 
+  let cleaningPlanResult: {
+    plan: Array<{ column: string; issue: string; fix: string; impact: string }>;
+    script: string;
+    summary: string;
+    actionCount: number;
+  } | null = null;
+
+  try {
+    const cleanPlanStep = await logStep({
+      projectId,
+      nodeId,
+      sourceFileId: sourceFile.id,
+      stepType: "suggest_cleaning",
+      inputSummary: { columnCount: profile.columns.length, criticalFlagCount },
+    });
+    emit("step", { stepType: "suggest_cleaning", status: "running" });
+
+    const result = await generateCleaningPlan(sourceFile.id);
+    cleaningPlanResult = result;
+
+    await supabase
+      .from("source_files")
+      .update({ cleaning_plan: { plan: result.plan, script: result.script, summary: result.summary } })
+      .eq("id", sourceFile.id);
+
+    await cleanPlanStep.finish({ actionCount: result.actionCount });
+    emit("step", { stepType: "suggest_cleaning", status: "completed", output: { actionCount: result.actionCount } });
+    emit("cleaning_plan_ready", {
+      plan: result.plan,
+      script: result.script,
+      summary: result.summary,
+      actionCount: result.actionCount,
+    });
+  } catch (err) {
+    console.error("[ingest] Cleaning plan generation failed (non-fatal):", err);
+    emit("step", { stepType: "suggest_cleaning", status: "failed" });
+  }
+
   return {
     sourceFileId: sourceFile.id,
     rowCount: parsed.rowCount,
@@ -185,5 +230,6 @@ export async function ingestBuffer(opts: IngestOptions): Promise<IngestResult> {
     overallQuality: profile.summary.overallQuality,
     avgConfidence,
     criticalFlagCount,
+    cleaningPlan: cleaningPlanResult,
   };
 }
